@@ -2,6 +2,24 @@
 
 Tất cả thay đổi đáng chú ý của dự án sẽ được ghi tại đây.
 
+## [1.2.0] - 2025-09-22
+
+### Mới/Thay đổi
+- Đưa action “Mở web/Quay lại” về header của trang chi tiết môn; bỏ khỏi header chung
+- Bổ sung loading overlay khi:
+  - Mở chi tiết môn học
+  - Mở chi tiết bài tập
+  - Mở đường dẫn ngoài (course/assignment)
+- Tối ưu UI login: nhóm TLS toggle gọn đẹp
+- Cập nhật hiển thị phiên bản trong Cài đặt lấy từ app (IPC)
+- Đổi installer.
+
+### Sửa lỗi
+- Lỗi không hiển thị chi tiết do thiếu `ensureUrlWithToken`
+- Một số luồng không mở được chi tiết course sau khi dọn UI
+
+---
+
 ## [1.1.0] - 2025-09-22
 
 ### Điểm nổi bật

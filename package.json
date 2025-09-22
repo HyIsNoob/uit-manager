@@ -1,6 +1,6 @@
 {
   "name": "uit-assignment-manager",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Ứng dụng quản lý bài tập cho sinh viên UIT",
   "main": "src/main.js",
   "scripts": {
@@ -43,6 +43,15 @@
     "win": {
       "target": "nsis",
       "icon": "favicon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "UIT Assignment Manager",
+      "uninstallDisplayName": "UIT Assignment Manager"
     },
     "mac": {
       "target": "dmg",
