@@ -1522,6 +1522,14 @@ ipcMain.handle('check-connection', async (event, token) => {
   }
 });
 
+ipcMain.handle('get-app-version', () => {
+  try {
+    return app.getVersion();
+  } catch (e) {
+    return null;
+  }
+});
+
 app.whenReady().then(() => {
   createWindow();
   notificationManager.init();

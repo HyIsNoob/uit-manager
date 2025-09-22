@@ -3230,6 +3230,21 @@ body {
     box-shadow: 0 10px 30px rgba(2, 6, 23, 0.08);
 }
 
+:root[data-theme="dark"] .course-header-card {
+    background: linear-gradient(180deg, rgba(15,23,42,0.9) 0%, rgba(30,41,59,0.9) 100%);
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+/* Course stats icon ensure contrast in light mode */
+.course-stats-grid .stat-icon {
+    background: linear-gradient(135deg, var(--uit-blue), var(--uit-accent));
+    color: #fff;
+}
+
+:root:not([data-theme="dark"]) .course-stats-grid .stat-icon i {
+    color: #fff;
+}
+
 .course-header-content {
     display: flex;
     align-items: center;
@@ -4062,3 +4077,48 @@ body {
         width: 200px;
     }
 }
+
+.login-screen .tls-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: var(--spacing-sm);
+    padding: 10px 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--bg-tertiary);
+    border-radius: 10px;
+}
+
+.login-screen .tls-toggle input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--uit-accent);
+}
+
+.login-screen .tls-toggle label {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+.assignment-loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+.assignment-loading-box {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    padding: 20px 24px;
+    border-radius: 14px;
+    border: var(--glass-border);
+    box-shadow: var(--glass-shadow-hover);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.assignment-loading-box i { color: var(--uit-blue); font-size: 20px; }

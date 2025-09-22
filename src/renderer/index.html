@@ -87,6 +87,10 @@
                             Xóa tài khoản đã chọn
                         </button>
                     </div>
+                    <div class="form-group tls-toggle">
+                        <input type="checkbox" id="login-allow-insecure-tls" />
+                        <label for="login-allow-insecure-tls">Bỏ qua kiểm tra chứng chỉ TLS</label>
+                    </div>
                 </div>
             </div>
 
@@ -462,7 +466,7 @@
                             </div>
                             <div class="setting-item">
                                 <label>Phiên bản:</label>
-                                <span>1.0.0</span>
+                                <span id="app-version">-</span>
                             </div>
                             <div class="setting-item">
                                 <label>Cập nhật ứng dụng</label>
@@ -486,12 +490,8 @@
                             </div>
                             <div class="setting-item">
                                 <label>Phát triển bởi:</label>
-                                <span>Sinh viên UIT</span>
+                                <span>Khang Hy</span>
                             </div>
-                        <div class="setting-item">
-                            <label>Bỏ qua kiểm tra chứng chỉ TLS</label>
-                            <input type="checkbox" id="allow-insecure-tls" />
-                        </div>
                         <div class="setting-item">
                             <label>Bật thông báo tự động</label>
                             <input type="checkbox" id="enable-notifications" />
@@ -554,19 +554,6 @@
 
                 <!-- Course Details Section -->
                 <section id="course-details-section" class="content-section hidden">
-                    <div class="page-header">
-                        <div class="page-header-left">
-                            <button class="btn btn-outline btn-small" onclick="showSection('courses')">
-                                <i class="fas fa-arrow-left"></i> Quay lại
-                            </button>
-                            <h2 id="course-details-title">Chi tiết môn học</h2>
-                        </div>
-                        <div class="page-header-right">
-                            <button class="btn btn-primary" id="open-course-btn" onclick="openCourseInBrowser(currentCourseDetails?.id)">
-                                <i class="fas fa-external-link-alt"></i> Mở web
-                            </button>
-                        </div>
-                    </div>
                     <div id="course-details-content">
                         <!-- Course details content will be loaded here -->
                     </div>

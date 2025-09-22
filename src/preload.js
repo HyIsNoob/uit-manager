@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSetting: (key) => ipcRenderer.invoke('get-setting', key),
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
   setBaseUrl: (url) => ipcRenderer.invoke('set-setting', 'baseUrl', url),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
 
   // Events
   onHasSavedAccounts: (callback) => ipcRenderer.on('has-saved-accounts', callback),

@@ -1244,6 +1244,7 @@ function showSection(sectionName) {
         activeNavItem.classList.add('active');
     }
     
+    // actions in global header removed
 }
 
 
@@ -3588,6 +3589,7 @@ let currentCourseDetails = null;
 
 async function openCourseDetails(courseId) {
     try {
+        showLoading('Đang mở chi tiết môn học...');
         console.log('Opening course details for ID:', courseId);
         const course = appState.courses.find(c => c.id === courseId);
         if (!course) {
@@ -3595,69 +3597,60 @@ async function openCourseDetails(courseId) {
             showNotification('Không tìm thấy khóa học', 'error');
             return;
         }
-        
         console.log('Found course:', course.fullname);
         currentCourseDetails = course;
         appState.currentCourse = course;
-        
-        // Show course details page
         console.log('Showing course details page');
-        showCourseDetailsPage(course);
-        
+        await showCourseDetailsPage(course);
     } catch (error) {
         console.error('Error opening course details:', error);
         showNotification('Lỗi tải thông tin môn học', 'error');
+    } finally {
+        hideLoading();
     }
 }
 
 async function showCourseDetailsPage(course) {
     console.log('showCourseDetailsPage called for course:', course.fullname);
-    
-    // Update title
-    elements.courseDetailsTitle.innerHTML = `<i class="fas fa-graduation-cap"></i> ${course.fullname}`;
-    console.log('Updated course title');
-    
-    // Update open course button
-    elements.openCourseBtn.onclick = () => openCourseInBrowser(course.id);
-    console.log('Updated open course button');
-    
-    // Update course meta (optional elements - may not exist after UI cleanup)
+    // Show loading quickly for rendering
+    showLoading('Đang tải nội dung khóa học...','course-loading');
     try {
-        if (elements.courseInstructor) {
-            const span = elements.courseInstructor.querySelector('span');
-            if (span) span.textContent = `${course.instructor || 'Chưa có thông tin'}`;
-            console.log('Updated course instructor');
+        // Update title (guard elements may be missing after cleanup)
+        if (elements.courseDetailsTitle) {
+            elements.courseDetailsTitle.innerHTML = `<i class="fas fa-graduation-cap"></i> ${course.fullname}`;
         }
-        if (elements.courseSemester) {
-            const semester = appState.courseSemMap.get(course.id) ? 
-                getCategory(appState.courseSemMap.get(course.id)) : null;
-            const span = elements.courseSemester.querySelector('span');
-            if (span) span.textContent = `${semester ? semester.name : 'Khóa học chung'}`;
-            console.log('Updated course semester');
+        // Update open course button if exists
+        if (elements.openCourseBtn) {
+            elements.openCourseBtn.onclick = () => openCourseInBrowser(course.id);
         }
-    } catch (e) {
-        console.warn('Optional course meta not updated:', e.message);
+        elements.courseDetailsContent.innerHTML = `
+            <div class="loading-placeholder">
+                <i class="fas fa-spinner fa-spin"></i>
+                <p>Đang tải nội dung khóa học...</p>
+            </div>
+        `;
+        showSection('course-details');
+        await loadCourseDetailsContent(course.id);
+    } finally {
+        hideLoading('course-loading');
     }
-    
-    console.log('Updated breadcrumb');
-    
-    // Show loading
-    elements.courseDetailsContent.innerHTML = `
-        <div class="loading-placeholder">
-            <i class="fas fa-spinner fa-spin"></i>
-            <p>Đang tải nội dung khóa học...</p>
-        </div>
-    `;
-    console.log('Set loading content');
-    
-    
-    // Show course details section
-    console.log('Calling showSection with course-details');
-    showSection('course-details');
-    
-    // Load course content
-    console.log('Loading course details content');
-    await loadCourseDetailsContent(course.id);
+}
+
+function openCourseInBrowser(courseId) {
+    try {
+        showLoading('Đang mở trên trình duyệt...', 'open-external-loading');
+        const course = appState.courses.find(c => c.id === courseId);
+        if (!course) {
+            console.error('Course not found:', courseId);
+            return;
+        }
+        const courseUrl = `${appState.baseUrl}/course/view.php?id=${courseId}`;
+        console.log('Opening course URL:', courseUrl);
+        window.electronAPI.openExternal(courseUrl);
+    } finally {
+        // Give a brief delay to avoid flicker
+        setTimeout(() => hideLoading('open-external-loading'), 500);
+    }
 }
 
 async function loadCourseDetailsContent(courseId) {
@@ -3798,7 +3791,7 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                         ${courseDetails.viewurl ? `
                             <a href="${courseDetails.viewurl}" target="_blank" class="btn btn-primary">
                                 <i class="fas fa-external-link-alt"></i>
-                                Vào môn học
+                                Mở web
                             </a>
                         ` : ''}
                     </div>
@@ -3980,33 +3973,6 @@ function closeCourseDetails() {
     
 }
 
-function openCourseInBrowser(courseId) {
-    const course = appState.courses.find(c => c.id === courseId);
-    if (!course) {
-        console.error('Course not found:', courseId);
-        return;
-    }
-    
-    // Open course URL in external browser
-    const courseUrl = `${appState.baseUrl}/course/view.php?id=${courseId}`;
-    console.log('Opening course URL:', courseUrl);
-    window.electronAPI.openExternal(courseUrl);
-}
-
-// Helper: append token to Moodle file URLs when missing to avoid missingparam errors
-function ensureUrlWithToken(url) {
-    try {
-        if (!url || !appState || !appState.currentToken) return url;
-        const hasToken = url.includes('token=');
-        if (hasToken) return url;
-        const hasQuery = url.includes('?');
-        return `${url}${hasQuery ? '&' : '?'}token=${encodeURIComponent(appState.currentToken)}`;
-    } catch (e) {
-        console.warn('ensureUrlWithToken error:', e.message);
-        return url;
-    }
-}
-
 function refreshCourseDetails() {
     if (currentCourseDetails) {
         loadCourseDetailsContent(currentCourseDetails.id);
@@ -4138,3 +4104,127 @@ async function init() {
 
 // Start the app
 document.addEventListener('DOMContentLoaded', init);
+
+// Update app version in settings if element exists
+(async function updateAppVersionLabel(){
+  try {
+    const el = document.getElementById('app-version');
+    if (!el || !window?.electronAPI?.getAppVersion) return;
+    const ver = await window.electronAPI.getAppVersion();
+    el.textContent = ver || '-';
+  } catch (e) {}
+})();
+
+// Bind TLS checkbox on login screen
+(function bindLoginTLS(){
+  const cb = document.getElementById('login-allow-insecure-tls');
+  if (!cb || !window?.electronAPI) return;
+  (async () => {
+    try {
+      const settings = await window.electronAPI.getSettings();
+      cb.checked = Boolean(settings?.allowInsecureTLS);
+    } catch {}
+  })();
+  cb.addEventListener('change', async (e) => {
+    try {
+      await window.electronAPI.setSetting('allowInsecureTLS', e.target.checked);
+      showNotification('TLS setting saved. You can try login again.', 'info');
+    } catch {}
+  });
+})();
+
+// Header course actions handlers
+// global header actions removed per design update
+
+// Assignment details loading overlay helpers
+function showAssignmentLoading() {
+  let overlay = document.getElementById('assignment-loading');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'assignment-loading';
+    overlay.className = 'assignment-loading-overlay';
+    overlay.innerHTML = '<div class="assignment-loading-box"><i class="fas fa-spinner fa-spin"></i><span>Đang tải chi tiết bài tập...</span></div>';
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display = 'flex';
+}
+function hideAssignmentLoading() {
+  const overlay = document.getElementById('assignment-loading');
+  if (overlay) overlay.style.display = 'none';
+}
+
+// Wrap openAssignment to show loading
+const __openAssignmentOriginal = typeof openAssignment === 'function' ? openAssignment : null;
+window.openAssignment = async function(assignId) {
+  try {
+    showAssignmentLoading();
+    if (__openAssignmentOriginal) {
+      await __openAssignmentOriginal(assignId);
+    } else {
+      // fallback to existing implementation call if defined later
+      if (typeof window.__openAssignmentImpl === 'function') {
+        await window.__openAssignmentImpl(assignId);
+      }
+    }
+  } catch (e) {
+    console.error('openAssignment error', e);
+  } finally {
+    hideAssignmentLoading();
+  }
+};
+
+// Generic page loading overlay
+function showLoading(message = 'Đang tải...', overlayId = 'page-loading') {
+  let overlay = document.getElementById(overlayId);
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = overlayId;
+    overlay.className = 'assignment-loading-overlay';
+    overlay.innerHTML = `<div class="assignment-loading-box"><i class="fas fa-spinner fa-spin"></i><span id="${overlayId}-text"></span></div>`;
+    document.body.appendChild(overlay);
+  }
+  const textEl = document.getElementById(`${overlayId}-text`);
+  if (textEl) textEl.textContent = message;
+  overlay.style.display = 'flex';
+}
+function hideLoading(overlayId = 'page-loading') {
+  const overlay = document.getElementById(overlayId);
+  if (overlay) overlay.style.display = 'none';
+}
+
+// Wrap openAssignmentDetails to show loading
+const __openAssignmentDetailsOriginal = openAssignmentDetails;
+openAssignmentDetails = async function(assignmentId){
+  try {
+    showLoading('Đang tải chi tiết bài tập...');
+    return await __openAssignmentDetailsOriginal(assignmentId);
+  } finally {
+    hideLoading();
+  }
+};
+
+// Wrap external openAssignment (open in browser) with loading
+const __openAssignmentExternalOriginal = openAssignment;
+openAssignment = async function(assignmentId){
+  try {
+    showLoading('Đang mở trên trình duyệt...', 'open-external-loading');
+    return await __openAssignmentExternalOriginal(assignmentId);
+  } finally {
+    setTimeout(() => hideLoading('open-external-loading'), 500);
+  }
+};
+
+// Ensure Moodle file URLs include token param when required
+function ensureUrlWithToken(url) {
+  try {
+    if (!url) return url;
+    if (!appState || !appState.currentToken) return url;
+    if (typeof url !== 'string') url = String(url);
+    if (url.includes('token=')) return url;
+    const hasQuery = url.includes('?');
+    return `${url}${hasQuery ? '&' : '?'}token=${encodeURIComponent(appState.currentToken)}`;
+  } catch (e) {
+    console.warn('ensureUrlWithToken error:', e?.message || e);
+    return url;
+  }
+}
