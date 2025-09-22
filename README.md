@@ -25,14 +25,13 @@
 
 ## 🖥️ Giao diện & Trải nghiệm
 
-- Dark theme theo màu thương hiệu UIT (UIT Blue `#1e3a8a`, Accent Cyan `#06b6d4`)
+- Dark theme theo màu trường UIT (UIT Blue `#1e3a8a`, Accent Cyan `#06b6d4`)
 - Hiệu ứng mượt mà: loading, transition, hover
 - Responsive cho nhiều độ phân giải màn hình
 
 ## 📦 Tải xuống
 
-- Windows: tải file cài đặt `.exe` trong thư mục `dist/` (ví dụ: `UIT Assignment Manager Setup 1.0.2.exe`).
-- Hoặc theo dõi mục Releases (sẽ cập nhật sau) trên repo.
+- Hoặc theo dõi mục Releases trên repo.
 
 > Lưu ý: Ứng dụng hỗ trợ Windows 10/11. macOS/Linux có thể build từ source.
 
@@ -80,8 +79,8 @@ npm run release # Đóng gói và publish lên GitHub (nếu cấu hình)
 ### Lấy token API Moodle
 
 1. Đăng nhập `https://moodle.uit.edu.vn`
-2. Vào **Tài khoản** → **Cài đặt** → **Khóa bảo mật**
-3. Tạo token cho dịch vụ “Moodle mobile web service”
+2. Vào **Tài khoản** → **Tùy Chọn** → **Khóa bảo mật**
+3. Tạo token cho dịch vụ “Moodle mobile web service” (Tái lập)
 4. Sao chép token và dán vào ứng dụng
 
 ## 🧩 Kiến trúc & Công nghệ
