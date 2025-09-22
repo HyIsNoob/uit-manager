@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UIT Assignment Manager</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <button id="theme-toggle" class="btn btn-outline" style="position:fixed; right:16px; bottom:16px; z-index:1000; width:auto;">
+        <i class="fas fa-moon"></i>
+        <span>Dark mode</span>
+    </button>
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="loading-content">
+            <div class="logo-container">
+                <img src="../../assets/uit_logo.png" alt="UIT Logo" class="logo">
+                <div class="logo-glow"></div>
+            </div>
+            <div class="loading-text">
+                <h2>UIT Assignment Manager</h2>
+                <p>Đang khởi tạo ứng dụng...</p>
+            </div>
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Screen -->
+    <div id="login-screen" class="login-screen hidden">
+        <div class="login-container">
+            <div class="login-header">
+                <div class="logo-section">
+                    <img src="../../assets/uit_logo.png" alt="UIT Logo" class="login-logo">
+                    <h1>UIT Assignment Manager</h1>
+                    <p>Quản lý bài tập một cách thông minh</p>
+                </div>
+            </div>
+
+            <div class="login-content">
+                <!-- New User Registration -->
+                <div id="new-user-form" class="auth-form hidden">
+                    <h2>Đăng ký tài khoản mới</h2>
+                    <div class="form-group">
+                        <label for="new-student-id">Mã số sinh viên</label>
+                        <input type="text" id="new-student-id" placeholder="Nhập mã số sinh viên" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-token">Token API Moodle</label>
+                        <input type="password" id="new-token" placeholder="Nhập token API" required>
+                        <small>Token này sẽ được lưu trữ an toàn trên máy tính của bạn</small>
+                    </div>
+                    <button id="register-btn" class="btn btn-primary">
+                        <i class="fas fa-user-plus"></i>
+                        Đăng ký tài khoản
+                    </button>
+                    <div class="form-switch">
+                        <span>Đã có tài khoản?</span>
+                        <a href="#" id="switch-to-login">Đăng nhập ngay</a>
+                    </div>
+                </div>
+
+                <!-- Existing User Login -->
+                <div id="existing-user-form" class="auth-form">
+                    <h2>Đăng nhập</h2>
+                    <div class="form-group">
+                        <label for="student-id">Mã số sinh viên</label>
+                        <select id="student-id" required>
+                            <option value="">Chọn mã số sinh viên</option>
+                        </select>
+                    </div>
+                    <button id="login-btn" class="btn btn-primary">
+                        <i class="fas fa-sign-in-alt"></i>
+                        Đăng nhập
+                    </button>
+                    <div class="form-switch">
+                        <span>Chưa có tài khoản?</span>
+                        <a href="#" id="switch-to-register">Đăng ký mới</a>
+                    </div>
+                    <div class="account-actions">
+                        <button id="remove-account-btn" class="btn btn-danger btn-small">
+                            <i class="fas fa-trash"></i>
+                            Xóa tài khoản đã chọn
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="login-footer">
+                <p>&copy; 2024 UIT Assignment Manager. Phát triển bởi sinh viên UIT.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Application -->
+    <div id="main-app" class="main-app hidden">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-left">
+                <img src="../../assets/uit_logo.png" alt="UIT Logo" class="header-logo">
+                <h1>UIT Assignment Manager</h1>
+            </div>
+            <div class="header-right">
+                <div class="user-info">
+                    <i class="fas fa-user"></i>
+                    <span id="user-name">Sinh viên</span>
+                </div>
+                <button id="logout-btn" class="btn btn-outline">
+                    <i class="fas fa-sign-out-alt"></i>
+                    Đăng xuất
+                </button>
+            </div>
+        </header>
+        
+
+        <!-- Main Content -->
+        <main class="app-main">
+            <!-- Sidebar -->
+            <aside class="sidebar" id="sidebar">
+                <div class="sidebar-header">
+                    <div class="sidebar-logo">
+                        <i class="fas fa-graduation-cap"></i>
+                        <span class="logo-text">UIT Manager</span>
+                    </div>
+                </div>
+                
+                <nav class="sidebar-nav">
+                    <div class="nav-section">
+                        <div class="nav-item active" data-section="dashboard">
+                            <div class="nav-icon">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                            <span class="nav-text">Dashboard</span>
+                        </div>
+                        
+                        <div class="nav-item" data-section="assignments">
+                            <div class="nav-icon">
+                                <i class="fas fa-tasks"></i>
+                            </div>
+                            <span class="nav-text">Bài tập</span>
+                        </div>
+                        
+                        <div class="nav-item" data-section="courses">
+                            <div class="nav-icon">
+                                <i class="fas fa-book-open"></i>
+                            </div>
+                            <span class="nav-text">Khóa học</span>
+                        </div>
+                        
+                        <div class="nav-item" data-section="settings">
+                            <div class="nav-icon">
+                                <i class="fas fa-cog"></i>
+                            </div>
+                            <span class="nav-text">Cài đặt</span>
+                        </div>
+                    </div>
+                </nav>
+                
+                <div class="sidebar-footer">
+                    <div class="user-profile">
+                        <div class="user-avatar">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div class="user-info">
+                            <span class="user-name" id="sidebar-user-name">Sinh viên</span>
+                            <span class="user-status">Đang hoạt động</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Content Area -->
+            <div class="content-area">
+                <!-- Dashboard Section -->
+                <section id="dashboard-section" class="content-section">
+                    <div class="section-header">
+                        <h2>Tổng quan thông minh</h2>
+                        <div class="header-actions">
+                            <button id="export-calendar-btn" class="btn btn-outline btn-small">
+                                <i class="fas fa-calendar-plus"></i>
+                                Xuất lịch
+                            </button>
+                            <button id="refresh-data-btn" class="btn btn-primary">
+                                <i class="fas fa-sync-alt"></i>
+                                Làm mới dữ liệu
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Smart Stats Grid -->
+                    <div class="stats-grid">
+                        <div class="stat-card priority-high">
+                            <div class="stat-icon">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="urgent-assignments">0</h3>
+                                <p>Bài tập khẩn cấp</p>
+                                <div class="stat-trend" id="urgent-trend">
+                                    <i class="fas fa-arrow-up"></i>
+                                    <span>+2 hôm nay</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="stat-card priority-medium">
+                            <div class="stat-icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="upcoming-assignments">0</h3>
+                                <p>Sắp đến hạn</p>
+                                <div class="stat-trend" id="upcoming-trend">
+                                    <i class="fas fa-arrow-down"></i>
+                                    <span>-1 tuần này</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="stat-card priority-low">
+                            <div class="stat-icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="completed-assignments">0</h3>
+                                <p>Đã hoàn thành</p>
+                                <div class="stat-trend" id="completed-trend">
+                                    <i class="fas fa-arrow-up"></i>
+                                    <span>+3 tuần này</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="completion-rate">0%</h3>
+                                <p>Tỷ lệ hoàn thành</p>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="completion-progress"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Smart Dashboard Content -->
+                    <div class="dashboard-content">
+                        <div class="content-grid">
+                            <!-- Today's Focus -->
+                            <div class="content-card focus-card">
+                                <div class="card-header">
+                                    <h3><i class="fas fa-bullseye"></i> Tập trung hôm nay</h3>
+                                    <div class="focus-actions">
+                                        <button class="btn-icon" id="focus-settings" title="Cài đặt">
+                                            <i class="fas fa-cog"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="today-focus" class="focus-content">
+                                    <div class="focus-item">
+                                        <div class="focus-priority high"></div>
+                                        <div class="focus-details">
+                                            <h4>Bài tập cần làm ngay</h4>
+                                            <p id="urgent-today">Đang tải...</p>
+                                        </div>
+                                    </div>
+                                    <div class="focus-item">
+                                        <div class="focus-priority medium"></div>
+                                        <div class="focus-details">
+                                            <h4>Chuẩn bị cho tuần tới</h4>
+                                            <p id="upcoming-week">Đang tải...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Smart Calendar -->
+                            <div class="content-card calendar-card">
+                                <div class="card-header">
+                                    <h3><i class="fas fa-calendar-alt"></i> Lịch tuần</h3>
+                                    <div class="calendar-actions">
+                                        <button class="btn-icon" id="prev-week" title="Tuần trước">
+                                            <i class="fas fa-chevron-left"></i>
+                                        </button>
+                                        <span id="current-week">Tuần hiện tại</span>
+                                        <button class="btn-icon" id="next-week" title="Tuần sau">
+                                            <i class="fas fa-chevron-right"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="week-calendar" class="week-calendar">
+                                    <!-- Week calendar will be populated by JS -->
+                                </div>
+                            </div>
+
+                            <!-- Progress Overview -->
+                            <div class="content-card progress-card">
+                                <div class="card-header">
+                                    <h3><i class="fas fa-chart-pie"></i> Tiến độ học kỳ</h3>
+                                </div>
+                                <div id="semester-progress" class="progress-overview">
+                                    <div class="progress-item">
+                                        <div class="progress-label">Học kỳ hiện tại</div>
+                                        <div class="progress-bar">
+                                            <div class="progress-fill" id="semester-progress-fill"></div>
+                                        </div>
+                                        <div class="progress-text" id="semester-progress-text">0%</div>
+                                    </div>
+                                    <div class="progress-stats">
+                                        <div class="stat-item">
+                                            <span class="stat-number" id="semester-assignments">0</span>
+                                            <span class="stat-label">Bài tập</span>
+                                        </div>
+                                        <div class="stat-item">
+                                            <span class="stat-number" id="semester-courses">0</span>
+                                            <span class="stat-label">Môn học</span>
+                                        </div>
+                                        <div class="stat-item">
+                                            <span class="stat-number" id="semester-days-left">0</span>
+                                            <span class="stat-label">Ngày còn lại</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Quick Actions -->
+                            <div class="content-card actions-card">
+                                <div class="card-header">
+                                    <h3><i class="fas fa-bolt"></i> Thao tác nhanh</h3>
+                                </div>
+                                <div class="quick-actions">
+                                    <button class="action-btn" id="quick-assignments">
+                                        <i class="fas fa-tasks"></i>
+                                        <span>Xem bài tập</span>
+                                    </button>
+                                    <button class="action-btn" id="quick-notes">
+                                        <i class="fas fa-sticky-note"></i>
+                                        <span>Ghi chú nhanh</span>
+                                    </button>
+                                    <button class="action-btn" id="quick-schedule">
+                                        <i class="fas fa-calendar-plus"></i>
+                                        <span>Lên lịch</span>
+                                    </button>
+                                    <button class="action-btn" id="quick-export">
+                                        <i class="fas fa-download"></i>
+                                        <span>Xuất báo cáo</span>
+                                    </button>
+                                    <button class="action-btn" id="ai-study-plan">
+                                        <i class="fas fa-robot"></i>
+                                        <span>AI Study Plan</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Assignments Section -->
+                <section id="assignments-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Quản lý bài tập</h2>
+                        <div class="filter-controls">
+                            <select id="semester-filter">
+                                <option value="">Tất cả học kỳ</option>
+                            </select>
+                            <select id="course-filter">
+                                <option value="">Tất cả môn học</option>
+                            </select>
+                            <select id="status-filter">
+                                <option value="">Tất cả trạng thái</option>
+                                <option value="submitted">Đã nộp</option>
+                                <option value="draft">Chưa nộp</option>
+                                <option value="late">Nộp muộn</option>
+                                <option value="group">Bài tập nhóm</option>
+                            </select>
+                            <button id="toggle-group-btn" class="btn btn-outline btn-small">
+                                <i class="fas fa-users"></i>
+                                <span>Chỉ hiện bài tập nhóm</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="assignments-list" class="assignments-list">
+                        <div class="loading-placeholder">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <p>Đang tải danh sách bài tập...</p>
+                        </div>
+                    </div>
+                </section>
+
+
+                <!-- Courses Section -->
+                <section id="courses-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Khóa học</h2>
+                        <div class="section-actions">
+                            <div class="filter-controls">
+                                <select id="semester-filter-courses" class="form-control">
+                                    <option value="">Tất cả học kỳ</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Course Categories -->
+                    <div class="course-categories">
+                        <!-- General Courses -->
+                        <div class="course-category" id="general-courses">
+                            <div class="category-header">
+                                <h3><i class="fas fa-globe"></i> Khóa học chung</h3>
+                                <span class="course-count" id="general-count">0</span>
+                            </div>
+                            <div class="courses-grid" id="general-courses-list">
+                                <!-- General courses will be populated here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Semester Courses -->
+                        <div class="course-category" id="semester-courses">
+                            <div class="category-header">
+                                <h3><i class="fas fa-calendar-alt"></i> Khóa học theo kỳ</h3>
+                                <span class="course-count" id="semester-count">0</span>
+                            </div>
+                            <div class="courses-grid" id="semester-courses-list">
+                                <!-- Semester courses will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Settings Section -->
+                <section id="settings-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Cài đặt</h2>
+                    </div>
+                    
+                    <div class="settings-content">
+                        <div class="settings-card">
+                            <h3>Tài khoản</h3>
+                            <div class="setting-item">
+                                <label>Mã số sinh viên hiện tại:</label>
+                                <span id="current-student-id">-</span>
+                            </div>
+                            <div class="setting-item">
+                                <label>Tên người dùng:</label>
+                                <span id="current-username">-</span>
+                            </div>
+                            <button id="change-account-btn" class="btn btn-outline">
+                                <i class="fas fa-exchange-alt"></i>
+                                Đổi tài khoản
+                            </button>
+                        </div>
+                        
+                        <div class="settings-card">
+                            <h3>Ứng dụng</h3>
+                            <div class="setting-item">
+                                <label>Base URL Moodle</label>
+                                <input type="text" id="base-url-input" placeholder="https://courses.uit.edu.vn" style="width:60%" />
+                            </div>
+                            <div class="setting-item">
+                                <label>Phiên bản:</label>
+                                <span>1.0.0</span>
+                            </div>
+                            <div class="setting-item">
+                                <label>Cập nhật ứng dụng</label>
+                                <div>
+                                    <button id="check-update-btn" class="btn btn-primary btn-small">
+                                        <i class="fas fa-sync-alt"></i>
+                                        Kiểm tra cập nhật
+                                    </button>
+                                    <button id="restart-update-btn" class="btn btn-outline btn-small" style="display:none;">
+                                        <i class="fas fa-download"></i>
+                                        Khởi động lại để cập nhật
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="setting-item" id="update-progress-row" style="display:none;align-items:center;gap:12px;">
+                                <label>Tiến trình tải</label>
+                                <div class="progress" style="width:260px;height:10px;background:var(--bg-tertiary);border-radius:6px;overflow:hidden;">
+                                    <div id="update-progress-bar" style="height:100%;width:0;background:linear-gradient(90deg,var(--uit-blue),var(--uit-accent));transition:width .2s;"></div>
+                                </div>
+                                <span id="update-progress-text" class="text-muted">0%</span>
+                            </div>
+                            <div class="setting-item">
+                                <label>Phát triển bởi:</label>
+                                <span>Sinh viên UIT</span>
+                            </div>
+                        <div class="setting-item">
+                            <label>Bỏ qua kiểm tra chứng chỉ TLS</label>
+                            <input type="checkbox" id="allow-insecure-tls" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Bật thông báo tự động</label>
+                            <input type="checkbox" id="enable-notifications" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Chu kỳ kiểm tra (phút)</label>
+                            <input type="number" id="polling-interval" min="1" max="60" value="5" style="width:80px" />
+                        </div>
+                    </div>
+                    
+                    <div class="settings-card">
+                        <h3>Thông báo thông minh</h3>
+                        <div class="setting-item">
+                            <label>Bật thông báo Windows Toast</label>
+                            <input type="checkbox" id="enable-toast-notifications" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Bật thông báo trong ứng dụng</label>
+                            <input type="checkbox" id="enable-in-app-notifications" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Bật âm thanh thông báo</label>
+                            <input type="checkbox" id="enable-notification-sound" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Chu kỳ kiểm tra thông báo (phút)</label>
+                            <input type="number" id="notification-check-interval" min="1" max="60" value="5" style="width:80px" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Thông báo bài tập mới</label>
+                            <input type="checkbox" id="notify-new-assignments" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Thông báo nội dung mới</label>
+                            <input type="checkbox" id="notify-new-content" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Thông báo deadline sắp tới</label>
+                            <input type="checkbox" id="notify-upcoming-deadlines" />
+                        </div>
+                        <div class="setting-actions">
+                            <button id="test-notification-btn" class="btn btn-outline btn-small">
+                                <i class="fas fa-bell"></i>
+                                Test thông báo
+                            </button>
+                            <button id="clear-notification-history-btn" class="btn btn-outline btn-small">
+                                <i class="fas fa-trash"></i>
+                                Xóa lịch sử
+                            </button>
+                        </div>
+                    </div>
+                    </div>
+                </section>
+                <!-- Assignment Details Section -->
+                <section id="assignment-details-section" class="content-section hidden">
+                    <div id="assignment-details-content">
+                        <!-- Assignment details content will be loaded here -->
+                    </div>
+                </section>
+
+                <!-- Course Details Section -->
+                <section id="course-details-section" class="content-section hidden">
+                    <div class="page-header">
+                        <div class="page-header-left">
+                            <button class="btn btn-outline btn-small" onclick="showSection('courses')">
+                                <i class="fas fa-arrow-left"></i> Quay lại
+                            </button>
+                            <h2 id="course-details-title">Chi tiết môn học</h2>
+                        </div>
+                        <div class="page-header-right">
+                            <button class="btn btn-primary" id="open-course-btn" onclick="openCourseInBrowser(currentCourseDetails?.id)">
+                                <i class="fas fa-external-link-alt"></i> Mở web
+                            </button>
+                        </div>
+                    </div>
+                    <div id="course-details-content">
+                        <!-- Course details content will be loaded here -->
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Notification Container -->
+    <div id="notification-container" class="notification-container"></div>
+
+    <!-- Assignment Details Modal -->
+    <div id="assignment-details-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="assignment-details-title">Chi tiết bài tập</h3>
+                <button class="modal-close" onclick="closeAssignmentDetails()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="assignment-details-content">
+                    <!-- Assignment Info -->
+                    <div class="details-section">
+                        <h4>Thông tin bài tập</h4>
+                        <div class="assignment-info-grid">
+                            <div class="info-item">
+                                <label>Tên bài tập:</label>
+                                <span id="details-assignment-name"></span>
+                            </div>
+                            <div class="info-item">
+                                <label>Môn học:</label>
+                                <span id="details-course-name"></span>
+                            </div>
+                            <div class="info-item">
+                                <label>Deadline:</label>
+                                <span id="details-deadline"></span>
+                            </div>
+                            <div class="info-item">
+                                <label>Trạng thái:</label>
+                                <span id="details-status"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Priority Setting -->
+                    <div class="details-section">
+                        <h4>Mức độ ưu tiên</h4>
+                        <div class="priority-selector">
+                            <label class="priority-option">
+                                <input type="radio" name="priority" value="low" onchange="setAssignmentPriority(this.value)">
+                                <span class="priority-badge priority-low">
+                                    <i class="fas fa-arrow-down"></i>
+                                    Thấp
+                                </span>
+                            </label>
+                            <label class="priority-option">
+                                <input type="radio" name="priority" value="medium" onchange="setAssignmentPriority(this.value)">
+                                <span class="priority-badge priority-medium">
+                                    <i class="fas fa-minus"></i>
+                                    Trung bình
+                                </span>
+                            </label>
+                            <label class="priority-option">
+                                <input type="radio" name="priority" value="high" onchange="setAssignmentPriority(this.value)">
+                                <span class="priority-badge priority-high">
+                                    <i class="fas fa-arrow-up"></i>
+                                    Cao
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Personal Notes -->
+                    <div class="details-section">
+                        <h4>Ghi chú cá nhân</h4>
+                        <textarea id="assignment-notes" placeholder="Thêm ghi chú cá nhân cho bài tập này..." 
+                                  onchange="saveAssignmentNotes(this.value)"></textarea>
+                    </div>
+
+                    <!-- Subtasks -->
+                    <div class="details-section">
+                        <h4>Danh sách công việc</h4>
+                        <div class="subtasks-container">
+                            <div class="add-subtask">
+                                <input type="text" id="new-subtask-input" placeholder="Thêm công việc mới..." 
+                                       onkeypress="handleSubtaskKeypress(event)">
+                                <button class="btn btn-primary btn-small" onclick="addSubtask()">
+                                    <i class="fas fa-plus"></i>
+                                    Thêm
+                                </button>
+                            </div>
+                            <div id="subtasks-list" class="subtasks-list">
+                                <!-- Subtasks will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Reminder Setting -->
+                    <div class="details-section">
+                        <h4>Nhắc nhở</h4>
+                        <div class="reminder-setting">
+                            <label>
+                                <input type="checkbox" id="enable-reminder" onchange="toggleReminder(this.checked)">
+                                Bật nhắc nhở
+                            </label>
+                            <div id="reminder-options" class="reminder-options hidden">
+                                <select id="reminder-time" onchange="updateReminderTime()">
+                                    <option value="1">1 giờ trước</option>
+                                    <option value="6">6 giờ trước</option>
+                                    <option value="24">1 ngày trước</option>
+                                    <option value="72">3 ngày trước</option>
+                                    <option value="168">1 tuần trước</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeAssignmentDetails()">Đóng</button>
+                <button class="btn btn-primary" onclick="openAssignment(currentAssignmentId)">
+                    <i class="fas fa-external-link-alt"></i>
+                    Mở bài tập
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Notes Modal -->
+    <div id="quick-notes-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Ghi chú nhanh</h3>
+                <button class="modal-close" onclick="closeQuickNotes()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <textarea id="quick-notes-text" placeholder="Viết ghi chú nhanh của bạn..." 
+                          style="width: 100%; height: 300px; resize: vertical;"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeQuickNotes()">Hủy</button>
+                <button class="btn btn-primary" onclick="saveQuickNotes()">
+                    <i class="fas fa-save"></i>
+                    Lưu ghi chú
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Schedule Modal -->
+    <div id="quick-schedule-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Lên lịch nhắc nhở</h3>
+                <button class="modal-close" onclick="closeQuickSchedule()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="schedule-assignment">Bài tập (tùy chọn):</label>
+                    <select id="schedule-assignment" class="form-control">
+                        <option value="">Chọn bài tập...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="schedule-time">Thời gian nhắc nhở:</label>
+                    <input type="datetime-local" id="schedule-time" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="schedule-message">Nội dung nhắc nhở:</label>
+                    <textarea id="schedule-message" class="form-control" placeholder="Nhập nội dung nhắc nhở..." rows="3"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeQuickSchedule()">Hủy</button>
+                <button class="btn btn-primary" onclick="saveQuickSchedule()">Lưu lịch</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Study Plan Modal -->
+    <div id="ai-study-plan-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-robot"></i> AI Study Plan - Lịch ôn tập thông minh</h3>
+                <button class="modal-close" onclick="closeAIStudyPlan()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="ai-study-plan-content">
+                    <div class="ai-loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <p>AI đang phân tích và tạo lịch ôn tập...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeAIStudyPlan()">Đóng</button>
+                <button class="btn btn-primary" onclick="refreshAIStudyPlan()">
+                    <i class="fas fa-sync-alt"></i>
+                    Làm mới
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+{
+  "name": "uit-assignment-manager",
+  "version": "1.0.2",
+  "description": "Ứng dụng quản lý bài tập cho sinh viên UIT",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "dist": "electron-builder --publish=never",
+    "release": "electron-builder --publish=always"
+  },
+  "keywords": [
+    "uit",
+    "assignment",
+    "moodle",
+    "electron"
+  ],
+  "author": "UIT Student",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^38.1.2",
+    "electron-builder": "^24.6.4"
+  },
+  "dependencies": {
+    "axios": "^1.7.5",
+    "electron-store": "^8.1.0",
+    "node-notifier": "^10.0.1",
+    "electron-updater": "^6.3.9"
+  },
+  "build": {
+    "appId": "com.uit.assignment-manager",
+    "productName": "UIT Assignment Manager",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "HyIsNoob",
+        "repo": "uit-assignment-manager"
+      }
+    ]
+  }
+}
