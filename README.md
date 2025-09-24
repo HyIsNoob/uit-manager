@@ -31,6 +31,7 @@
 
 ## 📦 Tải xuống
 
+- Tự build bằng npm run dist
 - Hoặc theo dõi mục Releases trên repo.
 
 > Lưu ý: Ứng dụng hỗ trợ Windows 10/11. macOS/Linux có thể build từ source.
@@ -78,7 +79,7 @@ npm run release # Đóng gói và publish lên GitHub (nếu cấu hình)
 
 ### Lấy token API Moodle
 
-1. Đăng nhập `https://moodle.uit.edu.vn`
+1. Đăng nhập `https://courses.uit.edu.vn`
 2. Vào **Tài khoản** → **Tùy Chọn** → **Khóa bảo mật**
 3. Tạo token cho dịch vụ “Moodle mobile web service” (Tái lập)
 4. Sao chép token và dán vào ứng dụng
@@ -130,7 +131,7 @@ Phát hành dưới giấy phép MIT.
 ## 🔗 Liên kết
 
 - Mã nguồn: `https://github.com/HyIsNoob/uit-manager`
-- Moodle UIT: `https://moodle.uit.edu.vn`
+- Moodle UIT: `https://courses.uit.edu.vn`
 
 ---
 
