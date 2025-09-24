@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSetting: (key) => ipcRenderer.invoke('get-setting', key),
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
   setBaseUrl: (url) => ipcRenderer.invoke('set-setting', 'baseUrl', url),
+  setMinimizeToTray: (enabled) => ipcRenderer.invoke('set-setting', 'minimizeToTray', enabled),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   // Windows Auto-start
   getAutoStart: () => ipcRenderer.invoke('get-auto-start'),

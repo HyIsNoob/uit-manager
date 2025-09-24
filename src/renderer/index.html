@@ -109,6 +109,10 @@
                 <h1>UIT Assignment Manager</h1>
             </div>
             <div class="header-right">
+                <div class="user-info" id="realtime-clock" title="Giờ hệ thống">
+                    <i class="fas fa-clock"></i>
+                    <span id="clock-text">--:--:--</span>
+                </div>
                 <div class="user-info">
                     <i class="fas fa-user"></i>
                     <span id="user-name">Sinh viên</span>
@@ -490,6 +494,10 @@
                                 <span id="current-username">-</span>
                             </div>
                                 <div class="setting-item">
+                                    <input type="checkbox" id="minimize-to-tray" />
+                                    <label for="minimize-to-tray">Thu nhỏ xuống khay khi đóng</label>
+                                </div>
+                                <div class="setting-item">
                                     <input type="checkbox" id="auto-start-windows" />
                                     <label for="auto-start-windows">Khởi động cùng Windows</label>
                                 </div>
@@ -548,7 +556,11 @@
                     </div>
                     
                     <div class="settings-card">
-                        <h3>Thông báo thông minh</h3>
+                        <h3>Thông báo</h3>
+                        <div class="setting-item">
+                            <label>Bỏ qua mục cũ quá (ngày)</label>
+                            <input type="number" id="ignore-old-days" min="1" max="60" value="7" style="width:80px" />
+                        </div>
                         <div class="setting-item">
                             <label>Bật thông báo Windows Toast</label>
                             <input type="checkbox" id="enable-toast-notifications" />

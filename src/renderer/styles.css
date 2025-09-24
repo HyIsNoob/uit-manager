@@ -4274,6 +4274,7 @@ body {
     border: 1px solid var(--bg-tertiary);
     text-align: center;
     vertical-align: middle;
+    background-clip: padding-box; /* avoid dark-mode hairlines */
 }
 
 .timetable-table .time-header {
@@ -4498,6 +4499,8 @@ body {
 
 [data-theme="dark"] .timetable-table {
     background: var(--bg-primary);
+    border-collapse: separate; /* prevent collapsed border artifacts */
+    border-spacing: 0;         /* remove gaps while separate */
 }
 
 [data-theme="dark"] .timetable-table .time-header,
@@ -4509,11 +4512,13 @@ body {
 [data-theme="dark"] .timetable-table .time-cell {
     background: var(--bg-secondary);
     color: var(--text-secondary);
+    background-clip: padding-box;
 }
 
 [data-theme="dark"] .timetable-table .event-cell,
 [data-theme="dark"] .timetable-table .empty-cell {
     background: var(--bg-primary);
+    background-clip: padding-box;
 }
 
 [data-theme="dark"] .event-content {

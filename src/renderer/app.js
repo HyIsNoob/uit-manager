@@ -68,6 +68,7 @@ const elements = {
     // Dashboard elements
     refreshDataBtn: document.getElementById('refresh-data-btn'),
     exportCalendarBtn: document.getElementById('export-calendar-btn'),
+    clockText: document.getElementById('clock-text'),
     urgentAssignments: document.getElementById('urgent-assignments'),
     upcomingAssignments: document.getElementById('upcoming-assignments'),
     completedAssignments: document.getElementById('completed-assignments'),
@@ -115,6 +116,7 @@ const elements = {
     pollingInterval: document.getElementById('polling-interval'),
     urgentDaysThreshold: document.getElementById('urgent-days-threshold'),
     autoStartWindows: document.getElementById('auto-start-windows'),
+    minimizeToTray: document.getElementById('minimize-to-tray'),
     
     // Smart Notification elements
     enableToastNotifications: document.getElementById('enable-toast-notifications'),
@@ -124,6 +126,7 @@ const elements = {
     notifyNewAssignments: document.getElementById('notify-new-assignments'),
     notifyNewContent: document.getElementById('notify-new-content'),
     notifyUpcomingDeadlines: document.getElementById('notify-upcoming-deadlines'),
+    ignoreOldDays: document.getElementById('ignore-old-days'),
     testNotificationBtn: document.getElementById('test-notification-btn'),
     clearNotificationHistoryBtn: document.getElementById('clear-notification-history-btn'),
     
@@ -196,6 +199,9 @@ async function applyThemeFromSettings() {
         if (elements.pollingInterval) {
             elements.pollingInterval.value = settings?.pollingInterval || 5;
         }
+        if (elements.minimizeToTray) {
+            elements.minimizeToTray.checked = settings?.minimizeToTray !== false; // default true
+        }
         // Load course colors if stored
         if (settings?.courseColors && typeof settings.courseColors === 'object') {
             appState.courseColors = settings.courseColors;
@@ -221,7 +227,29 @@ function updateSidebarUserInfo() {
     }
 }
 
-function showNotification(message, type = 'info', duration = 5000) {
+// Realtime clock
+function startRealtimeClock() {
+    if (!elements.clockText) return;
+    const update = () => {
+        try {
+            const now = new Date();
+            const dayNames = ['CN','Th 2','Th 3','Th 4','Th 5','Th 6','Th 7'];
+            const day = dayNames[now.getDay()];
+            const dd = String(now.getDate()).padStart(2,'0');
+            const mm = String(now.getMonth()+1).padStart(2,'0');
+            const yyyy = now.getFullYear();
+            const hh = String(now.getHours()).padStart(2,'0');
+            const mi = String(now.getMinutes()).padStart(2,'0');
+            // Simplified format: HH:MM  •  Th X, dd/mm/yyyy (no seconds)
+            elements.clockText.textContent = `${hh}:${mi}  •  ${day}, ${dd}/${mm}/${yyyy}`;
+        } catch {}
+    };
+    update();
+    // Update every 30s is enough (no seconds displayed)
+    setInterval(update, 30000);
+}
+
+function showNotification(message, type = 'info', duration = 3000) {
     const notification = document.createElement('div');
     notification.className = `notification ${type}`;
     
@@ -2391,6 +2419,9 @@ async function initializeApp() {
         // Start polling for new content
         startPolling();
 
+        // Start realtime clock
+        startRealtimeClock();
+
         // Wire auto-start checkbox
         if (elements.autoStartWindows) {
             elements.autoStartWindows.addEventListener('change', async (e) => {
@@ -2403,6 +2434,18 @@ async function initializeApp() {
                     }
                 } catch (err) {
                     showNotification('Lỗi lưu cài đặt khởi động', 'error');
+                }
+            });
+        }
+
+        // Wire minimize-to-tray checkbox
+        if (elements.minimizeToTray) {
+            elements.minimizeToTray.addEventListener('change', async (e) => {
+                try {
+                    await window.electronAPI.setMinimizeToTray(e.target.checked);
+                    showNotification('Đã cập nhật cài đặt thu nhỏ xuống khay', 'success');
+                } catch {
+                    showNotification('Không thể lưu cài đặt khay hệ thống', 'error');
                 }
             });
         }
@@ -2939,6 +2982,9 @@ class SmartNotificationSystem {
         }
         if (elements.notificationCheckInterval) {
             elements.notificationCheckInterval.value = this.settings.checkInterval / (60 * 1000);
+        }
+        if (elements.ignoreOldDays) {
+            elements.ignoreOldDays.value = this.settings.ignoreOldDays || 7;
         }
         if (elements.notifyNewAssignments) {
             elements.notifyNewAssignments.checked = this.settings.notifyNewAssignments;
@@ -4767,6 +4813,14 @@ function setupEventListeners() {
         elements.notificationCheckInterval.addEventListener('change', (e) => {
             const interval = Math.max(1, Math.min(60, parseInt(e.target.value) || 5));
             smartNotifications.settings.checkInterval = interval * 60 * 1000;
+            smartNotifications.saveSettings();
+        });
+    }
+    
+    if (elements.ignoreOldDays) {
+        elements.ignoreOldDays.addEventListener('change', (e) => {
+            const days = Math.max(1, Math.min(60, parseInt(e.target.value) || 7));
+            smartNotifications.settings.ignoreOldDays = days;
             smartNotifications.saveSettings();
         });
     }

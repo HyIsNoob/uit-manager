@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Notification, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Notification, shell, Tray, Menu } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -17,12 +17,18 @@ class SmartNotificationManager {
       content: new Map(),
       lastCheckTime: null
     };
+    this.persistKey = 'notificationState';
+    this.isPolling = false;
+    this.sessionStartSec = Math.floor(Date.now() / 1000);
+    // Session-only seen assignment ids per user (no persistence)
+    this.sessionSeenAssignments = new Map(); // userKey -> Set<assignmentId>
     this.notificationSettings = {
       enabled: true,
       showToasts: true,
       showInApp: true,
       soundEnabled: true,
-      checkInterval: 5 * 60 * 1000 // 5 minutes
+      checkInterval: 5 * 60 * 1000, // 5 minutes
+      ignoreOldDays: 7
     };
     this.pollingInterval = null;
   }
@@ -36,6 +42,8 @@ class SmartNotificationManager {
     
     // Load notification settings
     this.loadSettings();
+    // Mark session start timestamp to avoid notifying historical items on startup
+    this.sessionStartSec = Math.floor(Date.now() / 1000);
     
     // Start polling if enabled
     if (this.notificationSettings.enabled) {
@@ -71,6 +79,9 @@ class SmartNotificationManager {
     this.pollingInterval = setInterval(() => {
       this.checkForChanges();
     }, this.notificationSettings.checkInterval);
+
+    // Kick off immediately on start
+    this.checkForChanges();
   }
 
   // Stop polling
@@ -84,10 +95,114 @@ class SmartNotificationManager {
   // Check for changes in assignments and content
   async checkForChanges() {
     try {
-      // This will be called by the main process when data is available
-      // For now, we'll implement the notification logic
+      if (this.isPolling) return;
+      this.isPolling = true;
+      await this.pollAndNotify();
     } catch (error) {
       console.error('Error checking for changes:', error);
+    } finally {
+      this.isPolling = false;
+    }
+  }
+
+  // Load persisted notification baseline/state
+  loadPersistedState() {
+    try {
+      const state = store.get(this.persistKey, {});
+      return state && typeof state === 'object' ? state : {};
+    } catch {
+      return {};
+    }
+  }
+
+  // Save persisted notification baseline/state
+  savePersistedState(state) {
+    try {
+      store.set(this.persistKey, state);
+    } catch (e) {
+      console.warn('Failed to persist notification state:', e.message);
+    }
+  }
+
+  // Core polling: fetch data and emit only new changes
+  async pollAndNotify() {
+    const state = this.loadPersistedState();
+
+    // Fetch all saved accounts
+    const accounts = store.get('accounts', {});
+    const accountEntries = Object.entries(accounts);
+    if (accountEntries.length === 0) return; // nothing to do
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const ignoreDays = Number(this.notificationSettings.ignoreOldDays || 7);
+    const IGNORE_OLD_BEFORE_SEC = nowSec - ignoreDays * 24 * 60 * 60; // ignore older than N days
+
+    for (const [studentId, acc] of accountEntries) {
+      const userKey = String(acc.userid || studentId);
+      const token = acc.token;
+      if (!token) continue;
+
+      // Ensure per-user state bucket
+      if (!state[userKey]) state[userKey] = { baselineDone: false, seenAssignmentIds: {}, lastBaselineAt: 0 };
+
+      // Gather courses
+      let courses = [];
+      try {
+        const resp = await moodleRest(token, {
+          wsfunction: 'core_enrol_get_users_courses',
+          userid: acc.userid || undefined
+        });
+        courses = Array.isArray(resp) ? resp : [];
+      } catch (e) {
+        console.warn('Fetch courses failed:', e.message);
+        continue;
+      }
+
+      // Build course ids and fetch assignments
+      const courseIds = courses.map(c => Number(c.id)).filter(Boolean);
+      if (courseIds.length === 0) continue;
+
+      let assignments = [];
+      try {
+        const resp = await moodleRest(token, {
+          wsfunction: 'mod_assign_get_assignments',
+          courseids: courseIds
+        });
+        const cs = (resp && Array.isArray(resp.courses)) ? resp.courses : [];
+        cs.forEach(c => {
+          (Array.isArray(c.assignments) ? c.assignments : []).forEach(a => {
+            assignments.push({
+              id: Number(a.id),
+              name: a.name || '',
+              duedate: Number(a.duedate) || 0,
+              timemodified: Number(a.timemodified || a.allowsubmissionsfromdate || 0) || 0,
+              course: Number(c.id),
+              status: a.submissiondrafts ? 'draft' : 'unknown'
+            });
+          });
+        });
+      } catch (e) {
+        console.warn('Fetch assignments failed:', e.message);
+        continue;
+      }
+
+      // SIMPLE MODE: Notify only truly new assignment IDs in this session
+      let seenSet = this.sessionSeenAssignments.get(userKey);
+      if (!seenSet) {
+        // Initialize baseline without notifying
+        seenSet = new Set(assignments.map(a => Number(a.id)));
+        this.sessionSeenAssignments.set(userKey, seenSet);
+        // Also mirror to persisted state so we don't regress previous logic elsewhere
+        assignments.forEach(a => { state[userKey].seenAssignmentIds[String(a.id)] = a.timemodified || a.duedate || nowSec; });
+        this.savePersistedState(state);
+        continue;
+      }
+
+      const newOnes = assignments.filter(a => !seenSet.has(Number(a.id)));
+      if (newOnes.length > 0) {
+        newOnes.forEach(a => seenSet.add(Number(a.id)));
+        this.processChanges(newOnes.map(a => ({ type: 'new_assignment', assignment: a, message: `Bài tập mới: ${a.name}` })));
+      }
     }
   }
 
@@ -100,8 +215,8 @@ class SmartNotificationManager {
       message: message,
       icon: path.join(__dirname, '../assets/uit_logo.png'),
       sound: this.notificationSettings.soundEnabled,
-      wait: true,
-      timeout: 10,
+      wait: false,
+      timeout: 3,
       ...options
     };
 
@@ -325,6 +440,7 @@ function getBaseUrl() {
 }
 
 let mainWindow;
+let appTray;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -362,6 +478,16 @@ function createWindow() {
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools();
   }
+
+  // Override close to minimize to tray
+  mainWindow.on('close', (e) => {
+    const settings = store.get('settings', {});
+    const minimizeToTray = settings.minimizeToTray !== false; // default true
+    if (minimizeToTray && !app.isQuiting) {
+      e.preventDefault();
+      mainWindow.hide();
+    }
+  });
 }
 
 // Xây dựng query parameters cho Moodle API
@@ -1703,6 +1829,27 @@ app.whenReady().then(() => {
     autoUpdater.checkForUpdatesAndNotify();
   } catch (e) {
     console.warn('AutoUpdater init failed:', e.message);
+  }
+
+  // Create tray icon for background running
+  try {
+    const iconPath = path.join(__dirname, '../assets/uit_logo.png');
+    appTray = new Tray(iconPath);
+    const contextMenu = Menu.buildFromTemplate([
+      { label: 'Mở UIT Assignment Manager', click: () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } },
+      { type: 'separator' },
+      { label: 'Thoát', click: () => { app.isQuiting = true; app.quit(); } },
+    ]);
+    appTray.setToolTip('UIT Assignment Manager');
+    appTray.setContextMenu(contextMenu);
+    appTray.on('click', () => {
+      if (mainWindow) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+  } catch (e) {
+    console.warn('Tray init failed:', e.message);
   }
 });
 
