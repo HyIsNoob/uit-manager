@@ -95,7 +95,7 @@
             </div>
 
             <div class="login-footer">
-                <p>&copy; 2024 UIT Assignment Manager. Phát triển bởi sinh viên UIT.</p>
+                <p>&copy; 2025 UIT Assignment Manager. Phát triển bởi Hy.</p>
             </div>
         </div>
     </div>
@@ -153,6 +153,12 @@
                                 <i class="fas fa-book-open"></i>
                             </div>
                             <span class="nav-text">Khóa học</span>
+                        </div>
+                        <div class="nav-item" data-section="timetable">
+                            <div class="nav-icon">
+                                <i class="fas fa-calendar-week"></i>
+                            </div>
+                            <span class="nav-text">Thời khóa biểu</span>
                         </div>
                         
                         <div class="nav-item" data-section="settings">
@@ -281,22 +287,28 @@
                                 </div>
                             </div>
 
-                            <!-- Smart Calendar -->
+                            <!-- Smart Calendar (Month View) -->
                             <div class="content-card calendar-card">
                                 <div class="card-header">
-                                    <h3><i class="fas fa-calendar-alt"></i> Lịch tuần</h3>
+                                    <h3><i class="fas fa-calendar-alt"></i> Lịch tháng</h3>
                                     <div class="calendar-actions">
-                                        <button class="btn-icon" id="prev-week" title="Tuần trước">
+                                        <button class="btn-icon" id="prev-month" title="Tháng trước">
                                             <i class="fas fa-chevron-left"></i>
                                         </button>
-                                        <span id="current-week">Tuần hiện tại</span>
-                                        <button class="btn-icon" id="next-week" title="Tuần sau">
+                                        <span id="current-month">Tháng hiện tại</span>
+                                        <button class="btn-icon" id="next-month" title="Tháng sau">
                                             <i class="fas fa-chevron-right"></i>
                                         </button>
                                     </div>
                                 </div>
-                                <div id="week-calendar" class="week-calendar">
-                                    <!-- Week calendar will be populated by JS -->
+                                <div id="month-calendar" class="month-calendar">
+                                    <!-- Month calendar will be populated by JS -->
+                                </div>
+                                <div class="calendar-legend">
+                                    <span class="legend-item"><span class="legend-dot urgent"></span> Khẩn</span>
+                                    <span class="legend-item"><span class="legend-dot upcoming"></span> Sắp đến hạn</span>
+                                    <span class="legend-item"><span class="legend-dot submitted"></span> Đã nộp</span>
+                                    <span class="legend-item"><span class="legend-dot group"></span> Nhóm</span>
                                 </div>
                             </div>
 
@@ -330,35 +342,56 @@
                                 </div>
                             </div>
 
-                            <!-- Quick Actions -->
-                            <div class="content-card actions-card">
-                                <div class="card-header">
-                                    <h3><i class="fas fa-bolt"></i> Thao tác nhanh</h3>
-                                </div>
-                                <div class="quick-actions">
-                                    <button class="action-btn" id="quick-assignments">
-                                        <i class="fas fa-tasks"></i>
-                                        <span>Xem bài tập</span>
-                                    </button>
-                                    <button class="action-btn" id="quick-notes">
-                                        <i class="fas fa-sticky-note"></i>
-                                        <span>Ghi chú nhanh</span>
-                                    </button>
-                                    <button class="action-btn" id="quick-schedule">
-                                        <i class="fas fa-calendar-plus"></i>
-                                        <span>Lên lịch</span>
-                                    </button>
-                                    <button class="action-btn" id="quick-export">
-                                        <i class="fas fa-download"></i>
-                                        <span>Xuất báo cáo</span>
-                                    </button>
-                                    <button class="action-btn" id="ai-study-plan">
-                                        <i class="fas fa-robot"></i>
-                                        <span>AI Study Plan</span>
-                                    </button>
-                                </div>
-                            </div>
+                            <!-- Removed Quick Actions -->
                         </div>
+                    </div>
+                </section>
+
+                <!-- Course Color Picker Modal -->
+                <div id="course-color-modal" class="modal hidden">
+                    <div class="modal-content small">
+                        <h3>Chọn màu cho môn học</h3>
+                        <div class="color-preview" id="color-preview"></div>
+                        <input type="color" id="course-color-input" value="#b5f5e9" />
+                        <div class="modal-actions">
+                            <button id="save-course-color" class="btn btn-primary btn-small"><i class="fas fa-save"></i> Lưu</button>
+                            <button id="reset-course-color" class="btn btn-outline btn-small"><i class="fas fa-undo"></i> Mặc định</button>
+                            <button id="close-course-color" class="btn btn-small">Đóng</button>
+                        </div>
+                        <div class="modal-meta" id="course-color-meta"></div>
+                    </div>
+                </div>
+
+                <!-- Timetable Section -->
+                <section id="timetable-section" class="content-section hidden timetable-enhanced">
+                    <div class="section-header timetable-header-centered">
+                        <h2 class="tkb-title" data-animate>Thời khóa biểu</h2>
+                    </div>
+
+                    <div id="timetable-guide" class="info-card" style="margin-bottom:12px">
+                        <p>
+                            Hướng dẫn: Nhấn "Mở trang TKB", đăng nhập cổng sinh viên. Ở trang thời khóa biểu, tìm liên kết 
+                            "Nhấn vào đây để Thêm TKB vào GoogleCalendar/Calendar" để tải file <code>MSSV_scheduled.ics</code> về máy, sau đó nhấn "Import .ics" để nhập vào ứng dụng.
+                        </p>
+                    </div>
+
+                    <div class="timetable-toolbar hidden">
+                        <div class="tt-week-label" id="tt-week-label"></div>
+                    </div>
+
+                    <div id="timetable-grid" class="timetable-grid">
+                        <!-- Weekly grid rendered by app.js -->
+                    </div>
+
+                    <div class="timetable-actions-below">
+                        <button id="open-tkb-web" class="btn btn-outline btn-small" title="Mở trang TKB để tải file .ics">
+                            <i class="fas fa-external-link-alt"></i>
+                            Mở trang TKB
+                        </button>
+                        <button id="import-ics-btn" class="btn btn-primary btn-small" title="Nhập file .ics từ máy">
+                            <i class="fas fa-file-import"></i>
+                            Import .ics
+                        </button>
                     </div>
                 </section>
 
@@ -380,10 +413,10 @@
                                 <option value="late">Nộp muộn</option>
                                 <option value="group">Bài tập nhóm</option>
                             </select>
-                            <button id="toggle-group-btn" class="btn btn-outline btn-small">
-                                <i class="fas fa-users"></i>
-                                <span>Chỉ hiện bài tập nhóm</span>
-                            </button>
+                            <select id="sort-order" class="form-control">
+                                <option value="closest">Sắp xếp: Gần hạn nhất</option>
+                                <option value="farthest">Sắp xếp: Xa hạn nhất</option>
+                            </select>
                         </div>
                     </div>
                     
@@ -405,6 +438,10 @@
                                 <select id="semester-filter-courses" class="form-control">
                                     <option value="">Tất cả học kỳ</option>
                                 </select>
+                                <label style="display:flex;align-items:center;gap:8px;margin-left:12px;">
+                                    <input type="checkbox" id="toggle-general-courses" checked />
+                                    <span>Hiển thị Khóa học chung</span>
+                                </label>
                             </div>
                         </div>
                     </div>
@@ -452,6 +489,10 @@
                                 <label>Tên người dùng:</label>
                                 <span id="current-username">-</span>
                             </div>
+                                <div class="setting-item">
+                                    <input type="checkbox" id="auto-start-windows" />
+                                    <label for="auto-start-windows">Khởi động cùng Windows</label>
+                                </div>
                             <button id="change-account-btn" class="btn btn-outline">
                                 <i class="fas fa-exchange-alt"></i>
                                 Đổi tài khoản
@@ -463,6 +504,10 @@
                             <div class="setting-item">
                                 <label>Base URL Moodle</label>
                                 <input type="text" id="base-url-input" placeholder="https://courses.uit.edu.vn" style="width:60%" />
+                            </div>
+                            <div class="setting-item">
+                                <label>Số ngày deadline gấp</label>
+                                <input type="number" id="urgent-days-threshold" min="1" max="14" value="3" style="width:80px" />
                             </div>
                             <div class="setting-item">
                                 <label>Phiên bản:</label>
@@ -490,7 +535,7 @@
                             </div>
                             <div class="setting-item">
                                 <label>Phát triển bởi:</label>
-                                <span>Khang Hy</span>
+                                <span>Hy</span>
                             </div>
                         <div class="setting-item">
                             <label>Bật thông báo tự động</label>
@@ -683,60 +728,7 @@
         </div>
     </div>
 
-    <!-- Quick Notes Modal -->
-    <div id="quick-notes-modal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Ghi chú nhanh</h3>
-                <button class="modal-close" onclick="closeQuickNotes()">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <div class="modal-body">
-                <textarea id="quick-notes-text" placeholder="Viết ghi chú nhanh của bạn..." 
-                          style="width: 100%; height: 300px; resize: vertical;"></textarea>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-outline" onclick="closeQuickNotes()">Hủy</button>
-                <button class="btn btn-primary" onclick="saveQuickNotes()">
-                    <i class="fas fa-save"></i>
-                    Lưu ghi chú
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Quick Schedule Modal -->
-    <div id="quick-schedule-modal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Lên lịch nhắc nhở</h3>
-                <button class="modal-close" onclick="closeQuickSchedule()">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="schedule-assignment">Bài tập (tùy chọn):</label>
-                    <select id="schedule-assignment" class="form-control">
-                        <option value="">Chọn bài tập...</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="schedule-time">Thời gian nhắc nhở:</label>
-                    <input type="datetime-local" id="schedule-time" class="form-control" required>
-                </div>
-                <div class="form-group">
-                    <label for="schedule-message">Nội dung nhắc nhở:</label>
-                    <textarea id="schedule-message" class="form-control" placeholder="Nhập nội dung nhắc nhở..." rows="3"></textarea>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-outline" onclick="closeQuickSchedule()">Hủy</button>
-                <button class="btn btn-primary" onclick="saveQuickSchedule()">Lưu lịch</button>
-            </div>
-        </div>
-    </div>
+    <!-- Removed Quick Notes & Quick Schedule Modals -->
 
     <!-- AI Study Plan Modal -->
     <div id="ai-study-plan-modal" class="modal hidden">
@@ -761,6 +753,23 @@
                     <i class="fas fa-sync-alt"></i>
                     Làm mới
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar Day Picker Modal -->
+    <div id="calendar-day-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h3>Chọn bài tập</h3>
+                <button class="modal-close" onclick="closeCalendarDayPicker()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="calendar-day-body">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeCalendarDayPicker()">Đóng</button>
             </div>
         </div>
     </div>

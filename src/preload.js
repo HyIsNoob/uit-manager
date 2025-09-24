@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Group assignments (user defined)
   getGroupAssignments: () => ipcRenderer.invoke('get-group-assignments'),
   setGroupAssignment: (assignmentId, isGroup) => ipcRenderer.invoke('set-group-assignment', assignmentId, isGroup),
+  // Assignments cache
+  getAssignmentsCache: (userId, courseIds) => ipcRenderer.invoke('get-assignments-cache', userId, courseIds),
+  setAssignmentsCache: (userId, courseId, data) => ipcRenderer.invoke('set-assignments-cache', userId, courseId, data),
   
   // Smart Notifications
   getNotificationSettings: () => ipcRenderer.invoke('get-notification-settings'),
@@ -57,6 +60,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
   setBaseUrl: (url) => ipcRenderer.invoke('set-setting', 'baseUrl', url),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  // Windows Auto-start
+  getAutoStart: () => ipcRenderer.invoke('get-auto-start'),
+  setAutoStart: (enabled) => ipcRenderer.invoke('set-auto-start', enabled),
+  // Import ICS
+  importIcsFile: () => ipcRenderer.invoke('import-ics-file'),
+
+  // Word-backed Notes (RTF)
+  ensureCourseNoteDoc: (courseId, courseName) => ipcRenderer.invoke('ensure-course-note-doc', courseId, courseName),
+  deleteCourseNoteDoc: (courseId) => ipcRenderer.invoke('delete-course-note-doc', courseId),
+  ensureAssignmentNoteDoc: (assignmentId, name) => ipcRenderer.invoke('ensure-assignment-note-doc', assignmentId, name),
+  deleteAssignmentNoteDoc: (assignmentId) => ipcRenderer.invoke('delete-assignment-note-doc', assignmentId),
 
   // Events
   onHasSavedAccounts: (callback) => ipcRenderer.on('has-saved-accounts', callback),

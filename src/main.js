@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain, dialog, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Notification, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
+const fs = require('fs');
 const Store = require('electron-store');
 const axios = require('axios');
 const notifier = require('node-notifier');
@@ -508,9 +509,8 @@ ipcMain.handle('save-account', async (event, studentId, token) => {
 // SETTINGS: get/set
 function getSettings() {
   const settings = store.get('settings', {});
-  return {
-    theme: settings.theme || 'light',
-  };
+  if (!settings.theme) settings.theme = 'light';
+  return settings;
 }
 
 ipcMain.handle('get-settings', () => {
@@ -518,7 +518,7 @@ ipcMain.handle('get-settings', () => {
 });
 
 ipcMain.handle('get-setting', (event, key) => {
-  const settings = getSettings();
+  const settings = store.get('settings', {});
   return settings[key];
 });
 
@@ -527,6 +527,131 @@ ipcMain.handle('set-setting', (event, key, value) => {
   settings[key] = value;
   store.set('settings', settings);
   return { success: true };
+});
+
+// --- Notes as Word-compatible RTF files ---
+function ensureNotesDir() {
+  const notesDir = path.join(app.getPath('userData'), 'notes');
+  if (!fs.existsSync(notesDir)) fs.mkdirSync(notesDir, { recursive: true });
+  return notesDir;
+}
+
+function rtfEscape(text) {
+  const safe = String(text || '')
+    .replace(/[\\{}]/g, match => `\\${match}`);
+  let out = '';
+  for (const ch of safe) {
+    const code = ch.codePointAt(0);
+    if (code <= 0x7f) {
+      out += ch;
+    } else if (code <= 0xffff) {
+      // RTF expects signed 16-bit number for \u
+      const signed = code >= 0x8000 ? code - 0x10000 : code;
+      out += `\\u${signed}?`;
+    } else {
+      // Surrogate pair for non-BMP (rare in vi text)
+      const high = Math.floor((code - 0x10000) / 0x400) + 0xD800;
+      const low = ((code - 0x10000) % 0x400) + 0xDC00;
+      const sHigh = high >= 0x8000 ? high - 0x10000 : high;
+      const sLow = low >= 0x8000 ? low - 0x10000 : low;
+      out += `\\u${sHigh}?\\u${sLow}?`;
+    }
+  }
+  return out;
+}
+
+function writeRtfIfMissing(filePath, title) {
+  if (fs.existsSync(filePath)) return;
+  const now = new Date().toLocaleString('vi-VN');
+  const rtfTitle = rtfEscape(title);
+  const rtfNow = rtfEscape(`Tạo lúc ${now}`);
+  const rtf = [
+    '{\\rtf1\\ansi\\ansicpg1258\\deff0',
+    '{\\fonttbl{\\f0 Arial;}}',
+    '\\uc1\\pard',
+    `\\b ${rtfTitle}\\b0\\par`,
+    `${rtfNow}\\par`,
+    '}'
+  ].join('\n');
+  fs.writeFileSync(filePath, rtf, 'utf8');
+}
+
+ipcMain.handle('ensure-course-note-doc', async (event, courseId, courseName) => {
+  try {
+    const notesDir = ensureNotesDir();
+    const safeName = String(courseName || `Course_${courseId}`).replace(/[^\p{L}\p{N}\s_-]+/gu, '').trim().slice(0,80) || `Course_${courseId}`;
+    const filePath = path.join(notesDir, `course-${courseId}-${safeName}.rtf`);
+    writeRtfIfMissing(filePath, `Ghi chú môn: ${safeName}`);
+    const settings = store.get('settings', {});
+    settings[`courseNoteDoc_${courseId}`] = filePath;
+    store.set('settings', settings);
+    const { shell } = require('electron');
+    await shell.openPath(filePath);
+    return { success: true, path: filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('delete-course-note-doc', async (event, courseId) => {
+  try {
+    const settings = store.get('settings', {});
+    const filePath = settings[`courseNoteDoc_${courseId}`];
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Xóa ghi chú',
+      message: 'Bạn có chắc muốn xóa file ghi chú Word của môn học này? Hành động không thể hoàn tác.',
+      buttons: ['Hủy', 'Xóa'],
+      defaultId: 0,
+      cancelId: 0
+    });
+    if (response !== 1) return { success: false, cancelled: true };
+    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    delete settings[`courseNoteDoc_${courseId}`];
+    store.set('settings', settings);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('ensure-assignment-note-doc', async (event, assignmentId, name) => {
+  try {
+    const notesDir = ensureNotesDir();
+    const safeName = String(name || `Assignment_${assignmentId}`).replace(/[^\p{L}\p{N}\s_-]+/gu, '').trim().slice(0,80) || `Assignment_${assignmentId}`;
+    const filePath = path.join(notesDir, `assignment-${assignmentId}-${safeName}.rtf`);
+    writeRtfIfMissing(filePath, `Ghi chú bài tập: ${safeName}`);
+    const settings = store.get('settings', {});
+    settings[`assignmentNoteDoc_${assignmentId}`] = filePath;
+    store.set('settings', settings);
+    const { shell } = require('electron');
+    await shell.openPath(filePath);
+    return { success: true, path: filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('delete-assignment-note-doc', async (event, assignmentId) => {
+  try {
+    const settings = store.get('settings', {});
+    const filePath = settings[`assignmentNoteDoc_${assignmentId}`];
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Xóa ghi chú',
+      message: 'Bạn có chắc muốn xóa file ghi chú Word của bài tập này? Hành động không thể hoàn tác.',
+      buttons: ['Hủy', 'Xóa'],
+      defaultId: 0,
+      cancelId: 0
+    });
+    if (response !== 1) return { success: false, cancelled: true };
+    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    delete settings[`assignmentNoteDoc_${assignmentId}`];
+    store.set('settings', settings);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 });
 
 // User-defined group assignments store
@@ -620,6 +745,43 @@ ipcMain.handle('get-assignment-status', async (event, token, assignId, userId) =
       userid: Number(userId)
     });
     return { success: true, data };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Assignments cache (per user, per course)
+ipcMain.handle('get-assignments-cache', (event, userId, courseIds) => {
+  try {
+    const cache = store.get('assignmentsCache', {});
+    const userKey = String(userId || '');
+    const byUser = cache[userKey] || {};
+    const ids = Array.isArray(courseIds) ? courseIds : [courseIds];
+    const result = {};
+    ids.filter(id => id !== undefined && id !== null)
+      .forEach(id => {
+        const key = String(id);
+        if (byUser[key]) {
+          result[key] = byUser[key];
+        }
+      });
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('set-assignments-cache', (event, userId, courseId, data) => {
+  try {
+    const cache = store.get('assignmentsCache', {});
+    const userKey = String(userId || '');
+    if (!cache[userKey]) cache[userKey] = {};
+    cache[userKey][String(courseId)] = {
+      data,
+      timestamp: Date.now()
+    };
+    store.set('assignmentsCache', cache);
+    return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -1541,6 +1703,47 @@ app.whenReady().then(() => {
     autoUpdater.checkForUpdatesAndNotify();
   } catch (e) {
     console.warn('AutoUpdater init failed:', e.message);
+  }
+});
+
+// Auto-start with Windows
+ipcMain.handle('get-auto-start', async () => {
+  try {
+    const settings = app.getLoginItemSettings();
+    return { success: true, enabled: settings.openAtLogin };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('set-auto-start', async (event, enabled) => {
+  try {
+    app.setLoginItemSettings({ openAtLogin: Boolean(enabled) });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Import ICS file from dialog
+ipcMain.handle('import-ics-file', async () => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || (typeof mainWindow !== 'undefined' ? mainWindow : undefined);
+    const options = {
+      title: 'Chọn file thời khóa biểu (*.ics)',
+      filters: [{ name: 'iCalendar', extensions: ['ics'] }],
+      properties: ['openFile']
+    };
+    const res = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    if (res.canceled || !res.filePaths || !res.filePaths[0]) {
+      return { success: false, cancelled: true };
+    }
+    const filePath = res.filePaths[0];
+    const content = fs.readFileSync(filePath, 'utf8');
+    store.set('timetable.ics', content);
+    return { success: true, content, filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 });
 

@@ -16,6 +16,11 @@ const appState = {
     showGroupOnly: false,
     userGroupAssignments: new Map(),
     currentWeek: new Date(),
+    currentMonth: new Date(),
+    // New UI settings/state
+    sortOrder: 'closest', // 'closest' | 'farthest'
+    urgentDays: 3, // controls red threshold
+    pinnedAssignments: new Set(), // assignment IDs pinned by user
     dashboardData: {
         urgentAssignments: [],
         upcomingAssignments: [],
@@ -23,9 +28,17 @@ const appState = {
         completionRate: 0,
         semesterProgress: 0
     },
+    // In-memory assignments cache per course
+    assignmentsCache: {},
     breadcrumb: [],
     searchQuery: '',
     currentCourse: null,
+    // Timetable
+    icsRaw: '',
+    timetableEvents: [], // normalized events {dow(1-5), startMin, endMin, title, location, start, end}
+    timetableWeekStart: null,
+    timetableInited: false,
+    courseColors: {}, // code -> {bg,border,accent}
 };
 
 // DOM elements
@@ -62,19 +75,17 @@ const elements = {
     completionProgress: document.getElementById('completion-progress'),
     urgentToday: document.getElementById('urgent-today'),
     upcomingWeek: document.getElementById('upcoming-week'),
-    weekCalendar: document.getElementById('week-calendar'),
-    currentWeek: document.getElementById('current-week'),
-    prevWeek: document.getElementById('prev-week'),
-    nextWeek: document.getElementById('next-week'),
+    // Month calendar
+    monthCalendar: document.getElementById('month-calendar'),
+    currentMonthLabel: document.getElementById('current-month'),
+    prevMonth: document.getElementById('prev-month'),
+    nextMonth: document.getElementById('next-month'),
     semesterProgressFill: document.getElementById('semester-progress-fill'),
     semesterProgressText: document.getElementById('semester-progress-text'),
     semesterAssignments: document.getElementById('semester-assignments'),
     semesterCourses: document.getElementById('semester-courses'),
     semesterDaysLeft: document.getElementById('semester-days-left'),
-    quickAssignments: document.getElementById('quick-assignments'),
-    quickNotes: document.getElementById('quick-notes'),
-    quickSchedule: document.getElementById('quick-schedule'),
-    quickExport: document.getElementById('quick-export'),
+    // Quick actions removed
     
     // Assignment elements
     semesterFilter: document.getElementById('semester-filter'),
@@ -82,6 +93,7 @@ const elements = {
     statusFilter: document.getElementById('status-filter'),
     assignmentsList: document.getElementById('assignments-list'),
     toggleGroupBtn: document.getElementById('toggle-group-btn'),
+    sortOrder: document.getElementById('sort-order'),
     
     // Course elements
     coursesList: document.getElementById('courses-list'),
@@ -90,6 +102,7 @@ const elements = {
     semesterCoursesList: document.getElementById('semester-courses-list'),
     generalCount: document.getElementById('general-count'),
     semesterCount: document.getElementById('semester-count'),
+    toggleGeneralCourses: document.getElementById('toggle-general-courses'),
     
     
     // Settings elements
@@ -100,6 +113,8 @@ const elements = {
     baseUrlInput: document.getElementById('base-url-input'),
     enableNotifications: document.getElementById('enable-notifications'),
     pollingInterval: document.getElementById('polling-interval'),
+    urgentDaysThreshold: document.getElementById('urgent-days-threshold'),
+    autoStartWindows: document.getElementById('auto-start-windows'),
     
     // Smart Notification elements
     enableToastNotifications: document.getElementById('enable-toast-notifications'),
@@ -118,6 +133,14 @@ const elements = {
     // Sidebar elements
     sidebar: document.getElementById('sidebar'),
     sidebarUserName: document.getElementById('sidebar-user-name'),
+    // Timetable UI
+    openTkbWeb: document.getElementById('open-tkb-web'),
+    importIcsBtn: document.getElementById('import-ics-btn'),
+    ttPrevWeek: document.getElementById('tt-prev-week'),
+    ttNextWeek: document.getElementById('tt-next-week'),
+    ttWeekLabel: document.getElementById('tt-week-label'),
+    timetableGrid: document.getElementById('timetable-grid'),
+    timetableGuide: document.getElementById('timetable-guide'),
     
     // Course Details Modal elements
     // Assignment Details Page
@@ -134,6 +157,13 @@ const elements = {
     // Course meta elements
     courseInstructor: document.getElementById('course-instructor'),
     courseSemester: document.getElementById('course-semester')
+    ,courseColorModal: document.getElementById('course-color-modal')
+    ,courseColorInput: document.getElementById('course-color-input')
+    ,courseColorPreview: document.getElementById('color-preview')
+    ,courseColorMeta: document.getElementById('course-color-meta')
+    ,saveCourseColor: document.getElementById('save-course-color')
+    ,resetCourseColor: document.getElementById('reset-course-color')
+    ,closeCourseColor: document.getElementById('close-course-color')
 };
 // THEME
 async function applyThemeFromSettings() {
@@ -165,6 +195,11 @@ async function applyThemeFromSettings() {
         }
         if (elements.pollingInterval) {
             elements.pollingInterval.value = settings?.pollingInterval || 5;
+        }
+        // Load course colors if stored
+        if (settings?.courseColors && typeof settings.courseColors === 'object') {
+            appState.courseColors = settings.courseColors;
+            window.__courseColors = settings.courseColors; // for timetable renderer
         }
     } catch (e) {
         console.error('Failed to apply theme', e);
@@ -220,6 +255,41 @@ function showNotification(message, type = 'info', duration = 5000) {
     
     // Store timer for manual dismissal
     notification.autoDismissTimer = autoDismissTimer;
+
+    // Return the id so callers can programmatically dismiss if needed
+    return notificationId;
+}
+
+// Small utility: debounce and textarea autosize
+function debounce(fn, delay = 500) {
+    let t;
+    return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(() => fn(...args), delay);
+    };
+}
+
+function initAutosizeTextarea(ta) {
+    if (!ta) return;
+    const resize = () => {
+        ta.style.height = 'auto';
+        ta.style.height = (ta.scrollHeight + 2) + 'px';
+    };
+    ta.addEventListener('input', resize);
+    // initial
+    setTimeout(resize, 0);
+}
+
+function setNotesStatus(elId, text, type = 'muted') {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.textContent = text || '';
+    // If this is a new badge element, map classes accordingly
+    if (el.classList.contains('file-badge')) {
+        el.className = `file-badge ${type}`;
+    } else {
+        el.className = `notes-status ${type}`;
+    }
 }
 
 function dismissNotification(notificationId) {
@@ -551,6 +621,30 @@ async function loadCategoriesForCourses() {
 async function loadAssignmentsForCourse(courseId) {
     try {
         console.log(`Loading assignments for course ${courseId}`);
+        const courseKey = String(courseId);
+        // 1) Memory cache (15 minutes TTL)
+        const memCache = appState.assignmentsCache[courseKey];
+        if (memCache && Array.isArray(memCache.data) && (Date.now() - memCache.timestamp) < 15 * 60 * 1000) {
+            console.log(`Using in-memory cache for course ${courseId}: ${memCache.data.length} items`);
+            return memCache.data;
+        }
+
+        // 2) Persistent cache (1 hour TTL)
+        try {
+            const cachedResp = await window.electronAPI.getAssignmentsCache(appState.siteInfo?.userid, [Number(courseId)]);
+            if (cachedResp && cachedResp.success) {
+                const entry = cachedResp.data && cachedResp.data[courseKey];
+                if (entry && Array.isArray(entry.data) && (Date.now() - entry.timestamp) < 60 * 60 * 1000) {
+                    console.log(`Using persistent cache for course ${courseId}: ${entry.data.length} items`);
+                    appState.assignmentsCache[courseKey] = { data: entry.data, timestamp: entry.timestamp };
+                    return entry.data;
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to read assignments persistent cache:', e.message);
+        }
+
+        // 3) Fallback to API
         const data = await callAPI('getAssignments', appState.currentToken, [courseId]);
         const course = (data.courses || []).find(c => c.id === Number(courseId));
         const assignments = course ? (course.assignments || []) : [];
@@ -582,7 +676,7 @@ async function loadAssignmentsForCourse(courseId) {
             });
         }
         
-        // Load submission status and add cmid/url for each assignment
+    // Load submission status and add cmid/url for each assignment
         const assignmentsWithStatus = await Promise.all(assignments.map(async (assignment) => {
             try {
                 const status = await loadSubmissionStatus(assignment.id);
@@ -642,8 +736,12 @@ async function loadAssignmentsForCourse(courseId) {
                 };
             }
         }));
-        
-        return assignmentsWithStatus;
+        // Store enriched results to caches for future faster loads
+        const enriched = assignmentsWithStatus;
+        appState.assignmentsCache[courseKey] = { data: enriched, timestamp: Date.now() };
+        window.electronAPI.setAssignmentsCache(appState.siteInfo?.userid, Number(courseId), enriched).catch(() => {});
+
+        return enriched;
     } catch (error) {
         console.error('Failed to load assignments:', error);
         return [];
@@ -681,32 +779,37 @@ async function mapWithConcurrency(items, limit, mapper) {
 
 // Smart Dashboard Functions
 function calculateSmartStats() {
-    const now = Math.floor(Date.now() / 1000);
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const nextWeek = new Date(today);
-    nextWeek.setDate(nextWeek.getDate() + 7);
-    
-    // Calculate urgent assignments (due within 24 hours)
+    const now = Date.now();
+    const urgentDays = Number(appState.urgentDays) || 3;
+    const toHours = (ms) => ms / 36e5;
+
+    const isSubmitted = (a) => {
+        if (!a) return false;
+        const sub1 = a.submission?.status;
+        const sub2 = a.submissionStatus?.lastattempt?.submission?.status;
+        return sub1 === 'submitted' || sub2 === 'submitted';
+    };
+
     const urgent = appState.assignments.filter(a => {
-        if (!a.duedate || a.status === 'submitted' || a.isGroup) return false;
-        const dueDate = new Date(a.duedate * 1000);
-        return dueDate <= tomorrow && dueDate >= today;
+        if (!a?.duedate) return false;
+        if (isSubmitted(a)) return false;
+        if (a.isGroup) return false;
+        const diffH = toHours((a.duedate * 1000) - now);
+        return diffH >= 0 && diffH <= urgentDays * 24;
     });
-    
-    // Calculate upcoming assignments (due within 7 days)
+
     const upcoming = appState.assignments.filter(a => {
-        if (!a.duedate || a.status === 'submitted' || a.isGroup) return false;
-        const dueDate = new Date(a.duedate * 1000);
-        return dueDate <= nextWeek && dueDate > tomorrow;
+        if (!a?.duedate) return false;
+        if (isSubmitted(a)) return false;
+        if (a.isGroup) return false;
+        const diffH = toHours((a.duedate * 1000) - now);
+        return diffH > urgentDays * 24 && diffH <= 7 * 24;
     });
+
+    const completed = appState.assignments.filter(a => !a.isGroup && isSubmitted(a));
     
-    // Calculate completed assignments
-    const completed = appState.assignments.filter(a => a.status === 'submitted');
-    
-    // Calculate completion rate
-    const total = appState.assignments.length;
+    // Calculate completion rate (exclude group assignments)
+    const total = appState.assignments.filter(a => !a.isGroup).length;
     const completionRate = total > 0 ? Math.round((completed.length / total) * 100) : 0;
     
     // Update dashboard data
@@ -737,8 +840,9 @@ function calculateSemesterProgress() {
         return course && appState.courseSemMap.get(course.id) === currentSemester.id;
     });
     
-    const completed = semesterAssignments.filter(a => a.status === 'submitted').length;
-    return semesterAssignments.length > 0 ? Math.round((completed / semesterAssignments.length) * 100) : 0;
+    const filtered = semesterAssignments.filter(a => !a.isGroup);
+    const completed = filtered.filter(a => (a.submission?.status === 'submitted') || (a.submissionStatus?.lastattempt?.submission?.status === 'submitted')).length;
+    return filtered.length > 0 ? Math.round((completed / filtered.length) * 100) : 0;
 }
 
 function updateSmartDashboard() {
@@ -756,8 +860,8 @@ function updateSmartDashboard() {
     // Update focus content
     updateTodayFocus(stats);
     
-    // Update week calendar
-    updateWeekCalendar();
+    // Update month calendar
+    updateMonthCalendar();
     
     // Update semester progress
     updateSemesterProgress();
@@ -781,43 +885,162 @@ function updateTodayFocus(stats) {
     }
 }
 
-function updateWeekCalendar() {
-    const startOfWeek = new Date(appState.currentWeek);
-    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-    
-    const weekDays = [];
-    for (let i = 0; i < 7; i++) {
-        const day = new Date(startOfWeek);
-        day.setDate(startOfWeek.getDate() + i);
-        weekDays.push(day);
-    }
-    
-    // Update week label
-    const weekStart = weekDays[0];
-    const weekEnd = weekDays[6];
-    elements.currentWeek.textContent = `${weekStart.getDate()}/${weekStart.getMonth() + 1} - ${weekEnd.getDate()}/${weekEnd.getMonth() + 1}`;
-    
-    // Generate calendar HTML
-    const calendarHTML = weekDays.map(day => {
-        const dayAssignments = appState.assignments.filter(a => {
+function updateMonthCalendar() {
+    if (!elements.monthCalendar || !elements.currentMonthLabel) return;
+    const year = appState.currentMonth.getFullYear();
+    const month = appState.currentMonth.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const startDayOfWeek = (firstDay.getDay() + 6) % 7; // Mon=0..Sun=6
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const prevMonthDays = new Date(year, month, 0).getDate();
+    const leadingDays = startDayOfWeek;
+    const weekdays = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+    let html = `<div class="weekday-header">${weekdays.map(d => `<div class=\"weekday\">${d}</div>`).join('')}</div>`;
+    html += '<div class="month-grid">';
+    const todayStr = new Date().toDateString();
+    // Count how many assignments fall within the visible year-month
+    const itemsInThisMonth = (appState.assignments || []).filter(a => {
+        if (!a?.duedate) return false;
+        const due = new Date(a.duedate * 1000);
+        return due.getFullYear() === year && due.getMonth() === month;
+    }).length;
+
+    const getDotsForDate = (dateObj) => {
+        const items = appState.assignments.filter(a => {
             if (!a.duedate) return false;
-            const dueDate = new Date(a.duedate * 1000);
-            return dueDate.toDateString() === day.toDateString();
+            const due = new Date(a.duedate * 1000);
+            return due.getFullYear() === dateObj.getFullYear() &&
+                   due.getMonth() === dateObj.getMonth() &&
+                   due.getDate() === dateObj.getDate();
         });
-        
-        const isToday = day.toDateString() === new Date().toDateString();
-        const hasAssignments = dayAssignments.length > 0;
-        
-        return `
-            <div class="calendar-day ${isToday ? 'today' : ''} ${hasAssignments ? 'has-assignments' : ''}" 
-                 data-date="${day.toISOString().split('T')[0]}">
-                <div class="day-number">${day.getDate()}</div>
-                ${hasAssignments ? `<div class="day-assignments">${dayAssignments.length}</div>` : ''}
+        const now = new Date();
+        const toHours = (ms) => ms / 36e5;
+        let bgClass = '';
+        const urgentDays = Number(appState.urgentDays) || 3;
+        // Determine highest severity among non-submitted, non-group items
+        for (const a of items) {
+            if (a.isGroup) continue;
+            if (a.isSubmitted || a.status === 'submitted') continue;
+            const dueTime = new Date(a.duedate * 1000);
+            const diffH = toHours(dueTime - now);
+            if (diffH < 0) {
+                // Already past due: keep uncolored here; dots will still indicate
+                continue;
+            }
+            if (diffH <= urgentDays * 24) {
+                bgClass = 'deadline-urgent';
+                break;
+            } else if (diffH <= 7 * 24) {
+                // mark as near if not already urgent
+                bgClass = bgClass || 'deadline-near';
+            } else if (diffH > 7 * 24) {
+                // mark as far if nothing else
+                bgClass = bgClass || 'deadline-far';
+            }
+        }
+        const hasUrgent = items.some(a => {
+            if (a.isGroup || (a.isSubmitted || a.status === 'submitted') || !a.duedate) return false;
+            const diffH = toHours(new Date(a.duedate * 1000) - now);
+            return diffH >= 0 && diffH <= urgentDays * 24;
+        });
+        const hasUpcoming = items.some(a => {
+            if (a.isGroup || (a.isSubmitted || a.status === 'submitted') || !a.duedate) return false;
+            const diffH = toHours(new Date(a.duedate * 1000) - now);
+            return diffH > urgentDays * 24 && diffH <= 7 * 24;
+        });
+        const hasSubmitted = items.some(a => a.isSubmitted === true || a.status === 'submitted');
+        const hasGroup = items.some(a => a.isGroup);
+        const dots = [];
+        if (hasUrgent) dots.push('urgent');
+        if (hasUpcoming) dots.push('upcoming');
+        if (hasSubmitted) dots.push('submitted');
+        if (hasGroup) dots.push('group');
+        if (items.length > 0 && dots.length === 0) {
+            // Fallback: show 'upcoming' dot to indicate presence even if beyond 7 days
+            dots.push('upcoming');
+        }
+        return { count: items.length, dots: dots.slice(0, 3), bgClass };
+    };
+
+    for (let i = leadingDays; i > 0; i--) {
+        const d = new Date(year, month - 1, prevMonthDays - i + 1);
+        const { dots, count, bgClass } = getDotsForDate(d);
+        html += `
+        <div class="month-day other-month ${bgClass}" data-date="${d.toISOString().split('T')[0]}">
+            <div class="day-header">
+                <span>${d.getDate()}</span>
+                <div class="dots">${dots.map(t => `<span class=\"dot ${t}\"></span>`).join('')}</div>
             </div>
-        `;
-    }).join('');
-    
-    elements.weekCalendar.innerHTML = calendarHTML;
+            ${count > 0 ? `<div class="day-assignments">${count} việc</div>` : ''}
+        </div>`;
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const d = new Date(year, month, day);
+        const isToday = d.toDateString() === todayStr;
+        const { dots, count, bgClass } = getDotsForDate(d);
+        html += `
+        <div class="month-day ${isToday ? 'today' : ''} ${bgClass}" data-date="${d.toISOString().split('T')[0]}">
+            <div class="day-header">
+                <span>${day}</span>
+                <div class="dots">${dots.map(t => `<span class=\"dot ${t}\"></span>`).join('')}</div>
+            </div>
+            ${count > 0 ? `<div class="day-assignments">${count} việc</div>` : ''}
+        </div>`;
+    }
+
+    const totalCellsSoFar = leadingDays + daysInMonth;
+    const trailing = (7 - (totalCellsSoFar % 7)) % 7;
+    for (let i = 1; i <= trailing; i++) {
+        const d = new Date(year, month + 1, i);
+        const { dots, count, bgClass } = getDotsForDate(d);
+        html += `
+        <div class="month-day other-month ${bgClass}" data-date="${d.toISOString().split('T')[0]}">
+            <div class="day-header">
+                <span>${d.getDate()}</span>
+                <div class="dots">${dots.map(t => `<span class=\"dot ${t}\"></span>`).join('')}</div>
+            </div>
+            ${count > 0 ? `<div class="day-assignments">${count} việc</div>` : ''}
+        </div>`;
+    }
+
+    html += '</div>';
+    elements.monthCalendar.innerHTML = html;
+    const monthName = appState.currentMonth.toLocaleString('vi-VN', { month: 'long', year: 'numeric' });
+    elements.currentMonthLabel.textContent = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+    if (itemsInThisMonth === 0) {
+        const note = document.createElement('div');
+        note.className = 'calendar-empty-note';
+        note.textContent = 'Không có bài tập nào trong tháng này';
+        elements.monthCalendar.appendChild(note);
+    }
+
+    // Click behavior: open assignment details for the selected day
+    elements.monthCalendar.querySelectorAll('.month-day').forEach(cell => {
+        cell.addEventListener('click', () => {
+            const iso = cell.getAttribute('data-date');
+            if (!iso) return;
+            const d = new Date(iso + 'T00:00:00');
+            const items = (appState.assignments || []).filter(a => {
+                if (!a?.duedate) return false;
+                const due = new Date(a.duedate * 1000);
+                return due.getFullYear() === d.getFullYear() &&
+                       due.getMonth() === d.getMonth() &&
+                       due.getDate() === d.getDate();
+            });
+            if (items.length === 0) return;
+            if (items.length === 1) {
+                openAssignmentDetails(String(items[0].id));
+            } else {
+                openCalendarDayPicker(iso, items);
+            }
+        });
+    });
+}
+
+// Backward compatibility shim: keep function name if referenced elsewhere
+function updateWeekCalendar() {
+    updateMonthCalendar();
 }
 
 function updateSemesterProgress() {
@@ -917,10 +1140,24 @@ function handleSemesterChangeForCourses() {
 
 // Helper function to detect group assignments
 function isGroupAssignment(assignment) {
-    // Simple heuristic: check if assignment name contains keywords
-    const groupKeywords = ['nhóm', 'group', 'team', 'tập thể'];
-    const name = (assignment.name || '').toLowerCase();
-    return groupKeywords.some(keyword => name.includes(keyword));
+    try {
+        // Prefer explicit team submission flags/configs
+        if (assignment.teamsubmission === 1 || assignment.team_submission === 1) return true;
+        if (Array.isArray(assignment.configs)) {
+            const cfg = assignment.configs.find(c => /team.?submission/i.test(c.name || ''));
+            if (cfg && String(cfg.value) === '1') return true;
+        }
+        if (assignment.intro) {
+            const intro = String(assignment.intro).toLowerCase();
+            if (/(\bnhóm\b|\bgroup\b|\bteam\b|tập thể)/i.test(intro)) return true;
+        }
+        // Fallback: heuristic on name
+        const groupKeywords = ['nhóm', 'group', 'team', 'tập thể'];
+        const name = (assignment.name || '').toLowerCase();
+        return groupKeywords.some(keyword => name.includes(keyword));
+    } catch {
+        return false;
+    }
 }
 
 async function updateAssignmentsList() {
@@ -988,8 +1225,8 @@ async function updateAssignmentsList() {
             };
         });
         
-        // Apply filters
-        let filteredAssignments = processedAssignments;
+    // Apply filters
+    let filteredAssignments = processedAssignments;
         
         // Group filter
         if (appState.showGroupOnly) {
@@ -1008,6 +1245,38 @@ async function updateAssignmentsList() {
             });
         }
         
+        // Sort by due date with pinned on top
+        const nowTs = Date.now();
+        const sortDir = (appState.sortOrder === 'farthest') ? 1 : -1; // closest => ascending time to due
+        const dueMs = (a) => (a.duedate ? (a.duedate * 1000) : Number.MAX_SAFE_INTEGER);
+        const timeTo = (a) => (dueMs(a) - nowTs);
+        const isPinned = (a) => appState.pinnedAssignments.has(String(a.id));
+        filteredAssignments.sort((a, b) => {
+            // Pinned first
+            const pa = isPinned(a) ? 1 : 0;
+            const pb = isPinned(b) ? 1 : 0;
+            if (pa !== pb) return pb - pa; // pinned (1) before not (0)
+            // Then by due time ascending for closest, descending for farthest
+            const ta = timeTo(a);
+            const tb = timeTo(b);
+            if (isNaN(ta) && isNaN(tb)) return 0;
+            if (isNaN(ta)) return 1;
+            if (isNaN(tb)) return -1;
+            return (ta - tb) * (sortDir * -1);
+        });
+
+        // Merge processed items back into appState.assignments to keep dashboard/calendar in sync
+        try {
+            const existing = new Map(appState.assignments.map(a => [a.id, a]));
+            processedAssignments.forEach(a => {
+                existing.set(a.id, { ...(existing.get(a.id) || {}), ...a });
+            });
+            appState.assignments = Array.from(existing.values());
+            // Refresh dashboard + calendar to reflect the latest data source
+            updateSmartDashboard();
+            updateMonthCalendar();
+        } catch (e) { console.warn('Failed to merge assignments for dashboard sync:', e?.message || e); }
+
         // Render assignments
         if (filteredAssignments.length === 0) {
             elements.assignmentsList.innerHTML = '<p>Không có bài tập nào</p>';
@@ -1038,8 +1307,18 @@ async function updateAssignmentsList() {
             const course = appState.courses.find(c => (c.id === assignment.course) || (c.id === assignment.courseid));
             const courseName = course ? (course.fullname || course.displayname || course.shortname) : 'Môn học';
 
+            // Urgency background: if pending and within urgentDays -> add 'urgent' class
+            let urgencyClass = '';
+            if (statusClass === 'pending' && assignment.duedate) {
+                const msLeft = (assignment.duedate * 1000) - Date.now();
+                const daysLeft = msLeft / (1000 * 60 * 60 * 24);
+                const urgentDays = Number(appState.urgentDays) || 3;
+                if (daysLeft <= urgentDays && daysLeft >= 0) urgencyClass = 'urgent';
+            }
+
+            const pinned = appState.pinnedAssignments.has(String(assignment.id));
             return `
-                <div class="assignment-card ${statusClass}" data-assign-id="${assignment.id}">
+                <div class="assignment-card ${statusClass} ${urgencyClass}" data-assign-id="${assignment.id}">
                     <div class="assignment-header">
                         <div class="assignment-title">
                             ${assignment.isGroup ? '<i class="fas fa-users" style="margin-right: 8px; color: var(--group);"></i>' : ''}
@@ -1047,6 +1326,10 @@ async function updateAssignmentsList() {
                             <span class="assignment-course-pill" title="${courseName}"><i class="fas fa-book"></i> ${courseName}</span>
                         </div>
                         <div class="assignment-header-right">
+                            <label class="pin-label" title="Ưu tiên hiển thị">
+                                <input type="checkbox" class="pin-assignment-checkbox" ${pinned ? 'checked' : ''} />
+                                <i class="fas fa-thumbtack"></i>
+                            </label>
                             ${!assignment.isSubmitted ? `
                             <div class="countdown-chip" id="countdown-${assignment.id}">
                                 <i class="fas fa-clock"></i>
@@ -1099,6 +1382,25 @@ async function updateAssignmentsList() {
                 if (!assignId) return;
                 await window.electronAPI.setGroupAssignment(assignId, e.target.checked);
                 showNotification(e.target.checked ? 'Đã đánh dấu bài tập nhóm' : 'Đã bỏ đánh dấu bài tập nhóm', 'success');
+                updateAssignmentsList();
+            });
+        });
+        // Attach listeners for pin checkboxes
+        Array.from(document.querySelectorAll('.assignment-card .pin-assignment-checkbox')).forEach((cb) => {
+            cb.addEventListener('change', (e) => {
+                const card = e.target.closest('.assignment-card');
+                const assignId = card ? String(card.getAttribute('data-assign-id')) : null;
+                if (!assignId) return;
+                if (e.target.checked) {
+                    appState.pinnedAssignments.add(assignId);
+                } else {
+                    appState.pinnedAssignments.delete(assignId);
+                }
+                // Persist
+                try {
+                    localStorage.setItem('pinnedAssignments', JSON.stringify(Array.from(appState.pinnedAssignments)));
+                } catch {}
+                showNotification('Đã áp dụng', 'success');
                 updateAssignmentsList();
             });
         });
@@ -1158,6 +1460,12 @@ function updateCoursesList() {
         `;
     }
 
+    // Apply visibility toggle for General Courses section if control exists
+    const generalSection = document.getElementById('general-courses');
+    if (generalSection && elements.toggleGeneralCourses) {
+        generalSection.style.display = elements.toggleGeneralCourses.checked ? '' : 'none';
+    }
+
     // Render semester courses
     if (semesterCourses.length > 0) {
         elements.semesterCoursesList.innerHTML = semesterCourses.map(course => 
@@ -1215,6 +1523,14 @@ function updateSettings() {
     elements.currentStudentId.textContent = appState.currentStudentId || '-';
     elements.currentUsername.textContent = appState.currentUser?.fullname || '-';
     updateSidebarUserInfo();
+    // Load auto-start setting into UI when present
+    (async () => {
+        try {
+            const res = await window.electronAPI.getAutoStart();
+            const el = document.getElementById('auto-start-windows');
+            if (res?.success && el) el.checked = !!res.enabled;
+        } catch {}
+    })();
 }
 
 // Navigation functions
@@ -1245,6 +1561,554 @@ function showSection(sectionName) {
     }
     
     // actions in global header removed
+}
+
+// Timetable: open external TKB
+async function initTimetableUI() {
+    if (appState.timetableInited) return; // prevent double-binding
+    if (elements.openTkbWeb) {
+        elements.openTkbWeb.onclick = () => window.electronAPI.openExternal('https://student.uit.edu.vn/sinhvien/tkb');
+    }
+    if (elements.importIcsBtn) {
+        elements.importIcsBtn.onclick = async () => {
+            const res = await window.electronAPI.importIcsFile();
+            if (res?.success && res.content) {
+                appState.icsRaw = res.content;
+                await window.electronAPI.setSetting('timetable.ics', res.content);
+                parseIcsToEvents();
+                initWeek(new Date());
+                renderTimetable();
+                showNotification('Đã nhập thời khóa biểu', 'success');
+                if (elements.timetableGuide) elements.timetableGuide.classList.add('hidden');
+            } else if (!res?.cancelled) {
+                showNotification(res?.error || 'Không thể đọc file .ics', 'error');
+            }
+        };
+    }
+
+    // Load stored ICS
+    try {
+        const saved = await window.electronAPI.getSetting('timetable.ics');
+        if (typeof saved === 'string' && saved.trim()) {
+            appState.icsRaw = saved;
+            parseIcsToEvents();
+            initWeek(new Date());
+            renderTimetable();
+            if (elements.timetableGuide) elements.timetableGuide.classList.add('hidden');
+        }
+    } catch {}
+    appState.timetableInited = true;
+}
+
+function initWeek(refDate) {
+    const d = new Date(refDate);
+    // Set week start to Monday
+    const day = d.getDay(); // 0=Sun
+    const diff = (day === 0 ? -6 : 1 - day); // days to Monday
+    const monday = new Date(d);
+    monday.setDate(d.getDate() + diff);
+    monday.setHours(0,0,0,0);
+    appState.timetableWeekStart = monday;
+    if (elements.ttWeekLabel) {
+        const end = new Date(monday); end.setDate(monday.getDate()+4);
+        const fmt = (dt) => dt.toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit'});
+        elements.ttWeekLabel.textContent = `Tuần hiện tại: ${fmt(monday)} - ${fmt(end)}`;
+    }
+}
+function shiftWeek(deltaDays) { initWeek(new Date(appState.timetableWeekStart.getTime() + deltaDays*86400000)); renderTimetable(); }
+
+// Lightweight ICS parser for VEVENT DTSTART/DTEND/SUMMARY/LOCATION and WEEKLY RRULE BYDAY
+function parseIcsToEvents() {
+    appState.timetableEvents = [];
+    if (!appState.icsRaw) return;
+    const lines = appState.icsRaw.split(/\r?\n/);
+    let current = null;
+    const events = [];
+    for (const ln of lines) {
+        if (ln.startsWith('BEGIN:VEVENT')) current = {};
+        else if (ln.startsWith('END:VEVENT')) { if (current) { events.push(current); current=null; } }
+        else if (current) {
+            const [k, ...rest] = ln.split(':');
+            const v = rest.join(':');
+            if (k.startsWith('DTSTART')) current.DTSTART = v;
+            else if (k.startsWith('DTEND')) current.DTEND = v;
+            else if (k === 'SUMMARY') current.SUMMARY = v;
+            else if (k === 'LOCATION') current.LOCATION = v;
+            else if (k === 'DESCRIPTION') current.DESCRIPTION = v;
+            else if (k.startsWith('RRULE')) current.RRULE = v;
+        }
+    }
+    // Normalize
+    const toDate = (val) => {
+        // formats like 20250115T070000Z or local 20250115T070000
+        if (!val) return null;
+        const tzZ = val.endsWith('Z');
+        const y = parseInt(val.slice(0,4),10);
+        const m = parseInt(val.slice(4,6),10)-1;
+        const d = parseInt(val.slice(6,8),10);
+        const hh = parseInt(val.slice(9,11),10);
+        const mm = parseInt(val.slice(11,13),10);
+        const ss = parseInt(val.slice(13,15)||'0',10);
+        return tzZ ? new Date(Date.UTC(y,m,d,hh,mm,ss)) : new Date(y,m,d,hh,mm,ss);
+    };
+    const toDayStart = (dt) => { if (!dt) return null; const d = new Date(dt); d.setHours(0,0,0,0); return d; };
+    const dayMap = { MO:1, TU:2, WE:3, TH:4, FR:5, SA:6, SU:0 };
+    for (const e of events) {
+        const start = toDate(e.DTSTART);
+        const end = toDate(e.DTEND);
+        if (!start || !end) continue;
+        let bydays = [];
+        let until = null;
+        let interval = 1;
+        if (e.RRULE) {
+            const m = /BYDAY=([^;]+)/.exec(e.RRULE);
+            if (m) bydays = m[1].split(',').map(s=>s.trim());
+            const mu = /UNTIL=([0-9TZ]+)/.exec(e.RRULE);
+            if (mu) until = toDate(mu[1]);
+            const mi = /INTERVAL=(\d+)/.exec(e.RRULE);
+            if (mi) interval = Math.max(1, parseInt(mi[1],10) || 1);
+        }
+        // Parse course information from SUMMARY and DESCRIPTION
+        const summary = (e.SUMMARY||'').trim();
+        const desc = (e.DESCRIPTION||'').trim();
+        
+    // Extract course code (e.g., CS117.Q11, SE115.Q11)
+    const codeMatch = /(\b[A-Z]{2,}\d{2,3}\.[A-Z]\d{2}\b)/.exec(summary) || /(\b[A-Z]{2,}\d{2,3}\.[A-Z]\d{2}\b)/.exec(desc);
+    const code = codeMatch ? codeMatch[1] : null;
+        
+        // Extract course name from DESCRIPTION (in parentheses)
+        let courseName = '';
+        const nameInDesc = /\(([^)]+)\)/.exec(desc);
+        if (nameInDesc) courseName = nameInDesc[1];
+        
+        // If no course name from description, try to extract from summary
+        if (!courseName && code) {
+            const afterCode = new RegExp(code.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+"[\s-:]+([^\-]+)").exec(summary);
+            if (afterCode && afterCode[1]) courseName = afterCode[1].trim();
+        }
+        
+        // Extract period information from DESCRIPTION (e.g., "Tiết 123", "Tiết 90", "Tiết 10")
+        // Rules (the school's .ics export is inconsistent):
+        //  - A continuous string means consecutive periods ("123" -> 1,2,3 ; "678" -> 6,7,8)
+        //  - "0" alone or the substring "10" represents period 10
+        //  - A trailing 0 (e.g. "90") means the last period is 10 (=> 9,10)
+        //  - We also handle patterns like "910" => 9,10; "10" => 10
+        let periods = [];
+        const periodMatch = /Tiết\s*(\d+)/i.exec(desc);
+        if (periodMatch) {
+            const raw = periodMatch[1];
+            const expandPeriods = (str) => {
+                const result = [];
+                let i = 0;
+                while (i < str.length) {
+                    // Look ahead for "10" first
+                    if (str[i] === '1' && str[i+1] === '0') {
+                        result.push(10); i += 2; continue;
+                    }
+                    if (str[i] === '0') { // standalone 0 means 10
+                        result.push(10); i += 1; continue;
+                    }
+                    const n = parseInt(str[i], 10);
+                    if (!isNaN(n) && n > 0 && n <= 9) result.push(n);
+                    i += 1;
+                }
+                // If it looks like a consecutive run (e.g. 1,2,3) keep; otherwise just return as parsed
+                return result;
+            };
+            const expanded = expandPeriods(raw);
+            // If we got something like [1,10] from "10" we should collapse to just [10]
+            if (expanded.length === 2 && expanded[0] === 1 && expanded[1] === 10 && raw === '10') {
+                periods = [10];
+            } else {
+                periods = expanded;
+            }
+        }
+        
+        // Use official course name if available
+        let officialName = '';
+        if (code && Array.isArray(appState.courses) && appState.courses.length) {
+            const found = appState.courses.find(c => typeof c.shortname === 'string' && c.shortname.toUpperCase().includes(code.split('.')[0]));
+            if (found && found.fullname) officialName = found.fullname;
+        }
+        
+    const title = officialName || (courseName ? `${code ? code + ' - ' : ''}${courseName}` : summary);
+
+    // Instructor name (Vietnamese: "Giảng viên: <name>")
+    let instructor = '';
+    const gvMatch = /Giảng viên:\s*([^,\n]+)/i.exec(desc);
+    if (gvMatch) instructor = gvMatch[1].trim();
+        
+        // Extract room location
+        let loc = (e.LOCATION||'').trim();
+        if (!loc) {
+            const m1 = /P\.?\s*([A-Z0-9\.\-]+)/i.exec(summary);
+            const m2 = /P\.?\s*([A-Z0-9\.\-]+)/i.exec(desc);
+            if (m1 && m1[1]) loc = m1[1];
+            else if (m2 && m2[1]) loc = m2[1];
+        }
+        // Create events based on periods from DESCRIPTION
+        if (periods.length > 0) {
+            const periodTimes = {
+                1: { start: 7*60+30, end: 8*60+15 },
+                2: { start: 8*60+15, end: 9*60+0 },
+                3: { start: 9*60+0, end: 9*60+45 },
+                4: { start: 10*60+0, end: 10*60+45 },
+                5: { start: 10*60+45, end: 11*60+30 },
+                6: { start: 13*60+0, end: 13*60+45 },
+                7: { start: 13*60+45, end: 14*60+30 },
+                8: { start: 14*60+30, end: 15*60+15 },
+                9: { start: 15*60+30, end: 16*60+15 },
+                10: { start: 16*60+15, end: 17*60+0 }
+            };
+            
+            // Calculate start and end times based on periods
+            const sortedPeriods = periods.sort((a, b) => a - b);
+            const firstPeriod = sortedPeriods[0];
+            const lastPeriod = sortedPeriods[sortedPeriods.length - 1];
+            
+            const startMin = periodTimes[firstPeriod] ? periodTimes[firstPeriod].start : start.getHours()*60+start.getMinutes();
+            const endMin = periodTimes[lastPeriod] ? periodTimes[lastPeriod].end : end.getHours()*60+end.getMinutes();
+            
+            if (bydays.length === 0) {
+                // Single instance -> map to that weekday
+                const dow = start.getDay();
+                appState.timetableEvents.push({
+                    dow,
+                    startMin,
+                    endMin,
+                    title,
+                    location: loc,
+                    start,
+                    end,
+                    single: true,
+                    termStart: toDayStart(start),
+                    until: toDayStart(end),
+                    interval: 1,
+                    periods: sortedPeriods,
+                    code,
+                    instructor
+                });
+            } else {
+                for (const dcode of bydays) {
+                    const dow = dayMap[dcode];
+                    if (dow === undefined) continue;
+                    appState.timetableEvents.push({
+                        dow,
+                        startMin,
+                        endMin,
+                        title,
+                        location: loc,
+                        start,
+                        end,
+                        single: false,
+                        termStart: toDayStart(start),
+                        until: toDayStart(until),
+                        interval,
+                        periods: sortedPeriods,
+                        code,
+                        instructor
+                    });
+                }
+            }
+        } else {
+            // Fallback to original logic if no periods found
+            if (bydays.length === 0) {
+                const dow = start.getDay();
+                appState.timetableEvents.push({
+                    dow,
+                    startMin: start.getHours()*60+start.getMinutes(),
+                    endMin: end.getHours()*60+end.getMinutes(),
+                    title,
+                    location: loc,
+                    start,
+                    end,
+                    single: true,
+                    termStart: toDayStart(start),
+                    until: toDayStart(end),
+                    interval: 1,
+                    code,
+                    instructor
+                });
+            } else {
+                for (const dcode of bydays) {
+                    const dow = dayMap[dcode];
+                    if (dow === undefined) continue;
+                    appState.timetableEvents.push({
+                        dow,
+                        startMin: start.getHours()*60+start.getMinutes(),
+                        endMin: end.getHours()*60+end.getMinutes(),
+                        title,
+                        location: loc,
+                        start,
+                        end,
+                        single: false,
+                        termStart: toDayStart(start),
+                        until: toDayStart(until),
+                        interval,
+                        code,
+                        instructor
+                    });
+                }
+            }
+        }
+    }
+    // Toggle guide visibility
+    if (elements.timetableGuide) {
+        if (appState.timetableEvents.length > 0) elements.timetableGuide.classList.add('hidden');
+        else elements.timetableGuide.classList.remove('hidden');
+    }
+}
+
+function renderTimetable() {
+    if (!elements.timetableGrid || !appState.timetableWeekStart) return;
+    const weekStart = appState.timetableWeekStart;
+    const days = [1,2,3,4,5,6]; // Mon-Sat
+    const timeSlots = [
+        { label: 'Tiết 1', time: '7:30 - 8:15' },
+        { label: 'Tiết 2', time: '8:15 - 9:00' },
+        { label: 'Tiết 3', time: '9:00 - 9:45' },
+        { label: 'Tiết 4', time: '10:00 - 10:45' },
+        { label: 'Tiết 5', time: '10:45 - 11:30' },
+        { label: 'Tiết 6', time: '13:00 - 13:45' },
+        { label: 'Tiết 7', time: '13:45 - 14:30' },
+        { label: 'Tiết 8', time: '14:30 - 15:15' },
+        { label: 'Tiết 9', time: '15:30 - 16:15' },
+        { label: 'Tiết 10', time: '16:15 - 17:00' }
+    ];
+
+    const today = new Date(); today.setHours(0,0,0,0);
+    // Build grid container
+    let html = '<div class="tt-grid">';
+    // First row: empty top-left cell then day headers
+    html += '<div class="tt-corner tt-header">Thứ / Tiết</div>';
+    for (const d of days) {
+        const dt = new Date(weekStart); dt.setDate(weekStart.getDate()+d-1);
+        const isToday = dt.getTime() === today.getTime();
+        const label = dt.toLocaleDateString('vi-VN', { weekday:'short', day:'2-digit', month:'2-digit'});
+        html += `<div class="tt-day-header${isToday ? ' today' : ''}">${label}</div>`;
+    }
+    // Time labels + empty cells with explicit coordinates
+    // Grid coordinates: row 1 = header row. Period rows start at 2.
+    for (let r = 0; r < timeSlots.length; r++) {
+        const slot = timeSlots[r];
+        const gridRow = r + 2; // because row 1 is headers
+        html += `<div class=\"tt-time\" style=\"grid-column:1;grid-row:${gridRow};\"><strong>${slot.label}</strong><small>${slot.time}</small></div>`;
+        for (let c = 0; c < days.length; c++) {
+            const gridCol = c + 2; // column 1 is time column
+            html += `<div class=\"tt-cell\" style=\"grid-column:${gridCol};grid-row:${gridRow};\"></div>`;
+        }
+    }
+    // Events: create positioned items spanning rows
+    for (const ev of appState.timetableEvents) {
+        if (!days.includes(ev.dow)) continue;
+        const dayDate = new Date(weekStart); dayDate.setDate(weekStart.getDate()+ev.dow-1);
+        if (!isEventActiveOnDate(ev, dayDate)) continue;
+        let pStart, pEnd;
+        if (ev.periods && ev.periods.length) {
+            pStart = ev.periods[0];
+            pEnd = ev.periods[ev.periods.length-1];
+        } else {
+            // Approximate from minutes
+            const map = [
+                [450,495],[495,540],[540,585],[600,645],[645,690], // morning slots boundaries
+                [780,825],[825,870],[870,915],[930,975],[975,1020]
+            ];
+            const findIdx = (m) => map.findIndex(([s,e]) => m >= s && m < e) + 1;
+            pStart = findIdx(ev.startMin) || 1;
+            pEnd = findIdx(ev.endMin-1) || pStart;
+        }
+        const col = days.indexOf(ev.dow)+2; // +1 for time column, +1 because CSS grid is 1-based
+        const rowStart = 1 /* header row */ + 1 /* first time row */ + (pStart-1);
+        const rowEnd = rowStart + (pEnd - pStart + 1);
+    const roomLabel = ev.location ? (ev.location.startsWith('P.') ? ev.location : `P. ${ev.location}`) : '';
+    const pLabel = pStart === pEnd ? `Tiết ${pStart}` : `Tiết ${pStart}-${pEnd}`;
+    const codeHtml = ev.code ? `<div class=\"tt-event-code\">${ev.code}</div>` : '';
+    const baseTitle = ev.title || 'Môn học';
+    // Remove code prefix inside title if duplicate
+    const cleanedTitle = ev.code ? baseTitle.replace(ev.code, '').replace(/^[\s-:–]+/, '').trim() : baseTitle;
+    const nameHtml = `<div class=\"tt-event-title\">${cleanedTitle}</div>`;
+    const instrHtml = ev.instructor ? `<div class=\"tt-event-instructor\">${ev.instructor}</div>` : '';
+    const colorSettings = window.__courseColors || appState.courseColors || {};
+    const clr = ev.code && colorSettings[ev.code] ? colorSettings[ev.code] : null;
+    const styleVars = clr ? `--ev-bg:${clr.bg};--ev-border:${clr.border||clr.bg};--ev-accent:${clr.accent||clr.bg}` : '';
+    html += `<div class=\"tt-event\" style=\"grid-column:${col};grid-row:${rowStart}/${rowEnd};\">`+
+        `<div class=\"tt-event-inner\" data-color style=\"${styleVars}\">`+
+        codeHtml + nameHtml +
+        `<div class=\"tt-event-periods\">${pLabel}</div>`+
+        `<div class=\"tt-event-room\">${roomLabel}</div>`+
+        instrHtml +
+        `</div></div>`;
+    }
+    html += '</div>';
+    elements.timetableGrid.innerHTML = html;
+    highlightCurrentTimetableState();
+    attachCourseColorPickers();
+}
+
+// Highlight current period cell and ongoing event
+function highlightCurrentTimetableState() {
+    try {
+        const container = elements.timetableGrid.querySelector('.tt-grid');
+        if (!container) return;
+        const now = new Date();
+        const minutes = now.getHours()*60 + now.getMinutes();
+        const periodBounds = [
+            [450,495],[495,540],[540,585],[600,645],[645,690],
+            [780,825],[825,870],[870,915],[930,975],[975,1020]
+        ];
+        let currentPeriod = null;
+        periodBounds.forEach((b,i)=>{ if (minutes >= b[0] && minutes < b[1]) currentPeriod = i+1; });
+        // Clear previous
+        container.querySelectorAll('.tt-time').forEach(el=>el.classList.remove('current-period'));
+        container.querySelectorAll('.tt-event').forEach(el=>el.classList.remove('current'));
+        if (currentPeriod) {
+            const row = currentPeriod + 1; // +1 header
+            // Find time cell for that row
+            const timeCell = Array.from(container.querySelectorAll('.tt-time')).find(c => c.style.gridRow == row);
+            if (timeCell) timeCell.classList.add('current-period');
+            // Determine ongoing event
+            const events = container.querySelectorAll('.tt-event');
+            events.forEach(ev => {
+                const styleAttr = ev.getAttribute('style') || '';
+                // style contains: grid-column:X;grid-row:RS/RE;
+                const m = /grid-row:\s*(\d+)\s*\/\s*(\d+)/.exec(styleAttr);
+                if (m) {
+                    const rs = parseInt(m[1],10);
+                    const re = parseInt(m[2],10);
+                    const pIndex = currentPeriod + 1; // row index inside grid
+                    if (pIndex >= rs && pIndex < re) ev.classList.add('current');
+                }
+            });
+        }
+    } catch(e) { console.warn('Highlight timetable failed', e); }
+}
+
+// Periodic updater
+setInterval(()=>highlightCurrentTimetableState(), 60*1000);
+
+// Public helper to set course color (can be wired to future UI form)
+async function setCourseColor(code, bgColor) {
+    if (!code || !bgColor) return;
+    const norm = code.trim().toUpperCase();
+    appState.courseColors[norm] = { bg: bgColor };
+    window.__courseColors = appState.courseColors;
+    try {
+        await window.electronAPI.setSetting('courseColors', appState.courseColors);
+    } catch(e) { console.warn('Persist course color failed', e); }
+    renderTimetable();
+}
+
+// COURSE COLOR PICKER UI ----------------------------------
+let currentColorPickCode = null;
+function openCourseColorModal(code) {
+    if (!elements.courseColorModal) return;
+    currentColorPickCode = code;
+    const current = appState.courseColors[code] || {}; 
+    const defColor = current.bg || '#b5f5e9';
+    if (elements.courseColorInput) elements.courseColorInput.value = rgbToHex(defColor) || '#b5f5e9';
+    if (elements.courseColorPreview) elements.courseColorPreview.style.background = defColor;
+    if (elements.courseColorMeta) elements.courseColorMeta.textContent = code;
+    elements.courseColorModal.classList.remove('hidden');
+}
+function closeCourseColorModal() {
+    if (elements.courseColorModal) elements.courseColorModal.classList.add('hidden');
+}
+function attachCourseColorPickers() {
+    // timetable events
+    if (!elements.timetableGrid) return;
+    elements.timetableGrid.querySelectorAll('.tt-event').forEach(div => {
+        if (div.__colorBound) return; div.__colorBound = true;
+        div.addEventListener('dblclick', () => {
+            const codeEl = div.querySelector('.tt-event-code');
+            const code = codeEl ? codeEl.textContent.trim() : null;
+            if (code) openCourseColorModal(code);
+        });
+    });
+    // course list items coloring (applied each render assign tasks etc). We add class & style
+    applyCourseColorsToLists();
+}
+
+function applyCourseColorsToLists() {
+    try {
+        const colorMap = appState.courseColors || {};
+        const lists = [elements.coursesList, elements.semesterCoursesList, elements.generalCoursesList];
+        lists.forEach(list => {
+            if (!list) return;
+            list.querySelectorAll('[data-course-shortname]').forEach(li => {
+                const sn = li.getAttribute('data-course-shortname');
+                // Try to match color by code prefix (before '-')
+                const code = Object.keys(colorMap).find(c => sn && sn.toUpperCase().includes(c.split('.')[0]));
+                if (code) {
+                    li.classList.add('course-colored');
+                    li.style.setProperty('--course-color', colorMap[code].bg);
+                }
+            });
+        });
+    } catch(e) {}
+}
+
+// Helper: convert rgb/rgba or hex to hex  (#rrggbb)
+function rgbToHex(color) {
+    if (!color) return null;
+    if (color.startsWith('#')) return color.length === 4 ? '#' + color.slice(1).split('').map(c=>c+c).join('') : color;
+    const m = /rgba?\((\d+),(\d+),(\d+)/.exec(color.replace(/\s+/g,''));
+    if (!m) return '#b5f5e9';
+    const toHex = n => ('0'+parseInt(n,10).toString(16)).slice(-2);
+    return '#' + toHex(m[1]) + toHex(m[2]) + toHex(m[3]);
+}
+
+// Bind modal buttons (only once after DOM ready)
+document.addEventListener('DOMContentLoaded', () => {
+    if (elements.courseColorInput) {
+        elements.courseColorInput.addEventListener('input', () => {
+            const val = elements.courseColorInput.value;
+            if (elements.courseColorPreview) elements.courseColorPreview.style.background = val;
+        });
+    }
+    if (elements.saveCourseColor) {
+        elements.saveCourseColor.onclick = async () => {
+            if (currentColorPickCode && elements.courseColorInput) {
+                await setCourseColor(currentColorPickCode, elements.courseColorInput.value);
+            }
+            closeCourseColorModal();
+        };
+    }
+    if (elements.resetCourseColor) {
+        elements.resetCourseColor.onclick = async () => {
+            if (currentColorPickCode) {
+                delete appState.courseColors[currentColorPickCode];
+                await window.electronAPI.setSetting('courseColors', appState.courseColors);
+                window.__courseColors = appState.courseColors;
+                renderTimetable();
+                applyCourseColorsToLists();
+            }
+        };
+    }
+    if (elements.closeCourseColor) {
+        elements.closeCourseColor.onclick = () => closeCourseColorModal();
+    }
+    if (elements.courseColorModal) {
+        elements.courseColorModal.addEventListener('click', (e) => { if (e.target === elements.courseColorModal) closeCourseColorModal(); });
+    }
+});
+
+function isEventActiveOnDate(event, date) {
+    if (event.single) {
+        return event.termStart && sameDay(event.termStart, date);
+    }
+    // recurring weekly
+    if (event.termStart && date < event.termStart) return false;
+    if (event.until && date > event.until) return false;
+    const diffDays = Math.floor((date - event.termStart) / 86400000);
+    const diffWeeks = Math.floor(diffDays / 7);
+    return (diffWeeks % (event.interval || 1)) === 0;
+}
+
+
+function sameDay(a, b) {
+    return a.getFullYear() === b.getFullYear() && 
+           a.getMonth() === b.getMonth() && 
+           a.getDate() === b.getDate();
 }
 
 
@@ -1278,6 +2142,31 @@ async function loadAssignmentsForCurrentSemester() {
         });
         
         console.log(`Loading assignments for ${currentSemesterCourses.length} courses in current semester: ${currentSemester.name}`);
+
+        // Seed from persistent cache to update calendar/stats quickly
+        try {
+            const courseIds = currentSemesterCourses.map(c => Number(c.id));
+            const cachedResp = await window.electronAPI.getAssignmentsCache(appState.siteInfo?.userid, courseIds);
+            if (cachedResp && cachedResp.success) {
+                const now = Date.now();
+                const cachedAssignments = [];
+                Object.entries(cachedResp.data || {}).forEach(([cid, entry]) => {
+                    if (entry && Array.isArray(entry.data) && (now - entry.timestamp) < 24 * 60 * 60 * 1000) {
+                        cachedAssignments.push(...entry.data);
+                        // warm memory cache
+                        appState.assignmentsCache[String(cid)] = { data: entry.data, timestamp: entry.timestamp };
+                    }
+                });
+                if (cachedAssignments.length > 0) {
+                    appState.assignments = cachedAssignments;
+                    // Update just the calendar and dashboard while detailed list still shows loading
+                    updateSmartDashboard();
+                    updateMonthCalendar();
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to seed assignments from persistent cache:', e.message);
+        }
         
         // Show loading progress
         elements.assignmentsList.innerHTML = `
@@ -1318,8 +2207,12 @@ async function loadAssignmentsForCurrentSemester() {
             }
         }
         
-        console.log(`Loaded ${appState.assignments.length} assignments for current semester`);
-        console.log('Assignments loaded:', appState.assignments.map(a => ({ id: a.id, name: a.name, course: a.course })));
+    console.log(`Loaded ${appState.assignments.length} assignments for current semester`);
+    console.log('Assignments loaded:', appState.assignments.map(a => ({ id: a.id, name: a.name, course: a.course })));
+    // Refresh UI after full load
+    updateSmartDashboard();
+    updateAssignmentsList();
+    updateMonthCalendar();
         
     } catch (error) {
         console.error('Error loading assignments for current semester:', error);
@@ -1339,6 +2232,29 @@ async function loadAssignmentsForSemester(semesterId) {
         });
         
         console.log(`Loading assignments for ${semesterCourses.length} courses in semester: ${getCategory(semesterId)?.name}`);
+
+        // Seed from persistent cache for this semester
+        try {
+            const courseIds = semesterCourses.map(c => Number(c.id));
+            const cachedResp = await window.electronAPI.getAssignmentsCache(appState.siteInfo?.userid, courseIds);
+            if (cachedResp && cachedResp.success) {
+                const now = Date.now();
+                const cachedAssignments = [];
+                Object.entries(cachedResp.data || {}).forEach(([cid, entry]) => {
+                    if (entry && Array.isArray(entry.data) && (now - entry.timestamp) < 24 * 60 * 60 * 1000) {
+                        cachedAssignments.push(...entry.data);
+                        appState.assignmentsCache[String(cid)] = { data: entry.data, timestamp: entry.timestamp };
+                    }
+                });
+                if (cachedAssignments.length > 0) {
+                    appState.assignments = cachedAssignments;
+                    updateSmartDashboard();
+                    updateMonthCalendar();
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to seed semester assignments from cache:', e.message);
+        }
         
         // Show loading progress
         elements.assignmentsList.innerHTML = `
@@ -1379,8 +2295,12 @@ async function loadAssignmentsForSemester(semesterId) {
             }
         }
         
-        console.log(`Loaded ${appState.assignments.length} assignments for semester`);
-        console.log('Assignments loaded:', appState.assignments.map(a => ({ id: a.id, name: a.name, course: a.course })));
+    console.log(`Loaded ${appState.assignments.length} assignments for semester`);
+    console.log('Assignments loaded:', appState.assignments.map(a => ({ id: a.id, name: a.name, course: a.course })));
+    // Refresh UI after full load
+    updateSmartDashboard();
+    updateAssignmentsList();
+    updateMonthCalendar();
         
     } catch (error) {
         console.error('Error loading assignments for semester:', error);
@@ -1390,13 +2310,34 @@ async function loadAssignmentsForSemester(semesterId) {
 
 // Main initialization
 async function initializeApp() {
+    let loadingNotifId;
     try {
-        showNotification('Đang tải dữ liệu...', 'info');
+        loadingNotifId = showNotification('Đang tải dữ liệu...', 'info', 15000);
         
         // Load settings including baseUrl
         const settings = await window.electronAPI.getSettings();
         if (settings?.baseUrl) {
             appState.baseUrl = settings.baseUrl;
+        }
+        // Load urgent days threshold from settings if available
+        if (typeof settings?.urgentDaysThreshold === 'number') {
+            appState.urgentDays = settings.urgentDaysThreshold;
+        } else {
+            // also read from localStorage fallback
+            const ud = Number(localStorage.getItem('urgentDaysThreshold'));
+            if (!isNaN(ud) && ud > 0) appState.urgentDays = ud;
+        }
+        // Load pinned assignments
+        try {
+            const savedPins = JSON.parse(localStorage.getItem('pinnedAssignments') || '[]');
+            if (Array.isArray(savedPins)) {
+                appState.pinnedAssignments = new Set(savedPins.map(String));
+            }
+        } catch {}
+        // Load sort order
+        const savedSort = localStorage.getItem('sortOrder');
+        if (savedSort === 'closest' || savedSort === 'farthest') {
+            appState.sortOrder = savedSort;
         }
         
         // Load basic data
@@ -1411,6 +2352,20 @@ async function initializeApp() {
         updateCourseFilter();
         updateCoursesList();
         updateSettings();
+
+        // Reflect settings into controls
+        if (elements.sortOrder) {
+            elements.sortOrder.value = appState.sortOrder;
+        }
+        if (elements.urgentDaysThreshold) {
+            elements.urgentDaysThreshold.value = String(appState.urgentDays);
+        }
+        if (elements.toggleGeneralCourses) {
+            const savedGC = localStorage.getItem('showGeneralCourses');
+            if (savedGC !== null) {
+                elements.toggleGeneralCourses.checked = savedGC === 'true';
+            }
+        }
         
         // Switch to main app view
         if (elements.loginScreen && elements.mainApp) {
@@ -1423,15 +2378,38 @@ async function initializeApp() {
         await loadAssignmentsForCurrentSemester();
         updateDashboard();
 
+        // Initialize Timetable UI (bind buttons and load saved ICS)
+        await initTimetableUI();
+
     // Populate instructor names asynchronously for visible courses
     populateCourseInstructors().catch(e => console.warn('Populate instructors failed:', e.message));
         
-        showNotification('Tải dữ liệu thành công!', 'success');
+    // Dismiss the loading toast if it's still visible
+    if (loadingNotifId) dismissNotification(loadingNotifId);
+    showNotification('Tải dữ liệu thành công!', 'success');
         
         // Start polling for new content
         startPolling();
+
+        // Wire auto-start checkbox
+        if (elements.autoStartWindows) {
+            elements.autoStartWindows.addEventListener('change', async (e) => {
+                try {
+                    const res = await window.electronAPI.setAutoStart(e.target.checked);
+                    if (res?.success) {
+                        showNotification('Đã cập nhật khởi động cùng Windows', 'success');
+                    } else {
+                        showNotification('Không thể lưu cài đặt khởi động', 'error');
+                    }
+                } catch (err) {
+                    showNotification('Lỗi lưu cài đặt khởi động', 'error');
+                }
+            });
+        }
         
     } catch (error) {
+        // Ensure loading toast is dismissed on error as well
+        try { if (loadingNotifId) dismissNotification(loadingNotifId); } catch {}
         showNotification(`Lỗi khởi tạo ứng dụng: ${error.message}`, 'error');
         console.error('Initialization error:', error);
     }
@@ -1827,6 +2805,34 @@ function exportFeedData() {
 function populateInfoCourseSelect() {
     // This is now handled by the unified feed
     if (elements.feedCourseFilter) {
+
+// Calendar day picker modal
+function openCalendarDayPicker(isoDate, items) {
+    const modal = document.getElementById('calendar-day-modal');
+    const body = document.getElementById('calendar-day-body');
+    if (!modal || !body) return;
+    const d = new Date(isoDate + 'T00:00:00');
+    const title = modal.querySelector('.modal-header h3');
+    if (title) title.textContent = `Bài tập ngày ${d.toLocaleDateString('vi-VN')}`;
+    body.innerHTML = items.map(a => `
+        <div class="content-item" style="cursor:pointer" onclick="(function(){ document.getElementById('calendar-day-modal').classList.add('hidden'); openAssignmentDetails('${a.id}'); })()">
+            <div class="content-item-header">
+                <span class="content-type-badge assignment">Bài tập</span>
+                <span class="content-date">${new Date(a.duedate*1000).toLocaleTimeString('vi-VN')}</span>
+            </div>
+            <h5 class="content-title">${a.name}</h5>
+            <div class="content-meta">
+                <span class="status-badge ${a.status}">${a.status === 'submitted' ? 'Đã nộp' : 'Chưa nộp'}</span>
+            </div>
+        </div>
+    `).join('');
+    modal.classList.remove('hidden');
+}
+
+function closeCalendarDayPicker() {
+    const modal = document.getElementById('calendar-day-modal');
+    if (modal) modal.classList.add('hidden');
+}
         elements.feedCourseFilter.innerHTML = '<option value="">Tất cả môn học</option>';
         appState.courses.forEach(c => {
             const opt = document.createElement('option');
@@ -2401,7 +3407,7 @@ async function openAssignmentDetails(assignmentId) {
     }
 }
 
-function showAssignmentDetailsPage(assignment) {
+async function showAssignmentDetailsPage(assignment) {
     try {
         console.log('showAssignmentDetailsPage called with:', assignment);
         
@@ -2459,6 +3465,9 @@ function showAssignmentDetailsPage(assignment) {
                         <button class="btn-header btn-primary" id="open-assignment-btn" onclick="openAssignment(${assignment.id})" title="Mở bài tập">
                             <i class="fas fa-external-link-alt"></i>
                         </button>
+                        <button class="btn-header btn-primary" onclick="openSubmission(${assignment.id})" title="Mở trang nộp bài">
+                            <i class="fas fa-upload"></i>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -2469,6 +3478,9 @@ function showAssignmentDetailsPage(assignment) {
                     <div class="assignment-meta-item priority-highlight">
                         <span class="assignment-meta-label">Môn học</span>
                         <span class="assignment-meta-value">${courseName}</span>
+                        <button class="btn btn-link" style="margin-left:8px" onclick="openCourseDetails(${assignment.course})" title="Mở chi tiết môn học">
+                            <i class="fas fa-graduation-cap"></i> Xem môn học
+                        </button>
                     </div>
                     <div class="assignment-meta-item priority-highlight">
                         <span class="assignment-meta-label">Hạn nộp</span>
@@ -2498,6 +3510,22 @@ function showAssignmentDetailsPage(assignment) {
                 <div class="assignment-description-content">${assignment.intro}</div>
             </div>
             ` : ''}
+            <div class="details-section">
+                <h4>Ghi chú cá nhân</h4>
+                <textarea id="assignment-page-notes" placeholder="Thêm ghi chú cho bài tập này..." onchange="saveAssignmentPageNotes(${assignment.id}, this.value)"></textarea>
+                <div class="notes-status" id="assignment-notes-status"></div>
+                <div class="notes-actions-row notes-actions-equal">
+                    <button class="btn btn-outline btn-small btn-note-action" id="btn-open-assignment-word" onclick="ensureAssignmentNoteDoc(${assignment.id}, '${(assignment.name||'').replace(/['"\\]/g,'') || 'Bai tap'}')">
+                        <i class="fas fa-file-word"></i> Mở ghi chú Word
+                    </button>
+                    <button class="btn btn-danger btn-small btn-note-action" id="btn-del-assignment-word" onclick="deleteAssignmentNoteDoc(${assignment.id})">
+                        <i class="fas fa-trash"></i> Xóa ghi chú Word
+                    </button>
+                    <span id="assignment-word-indicator" class="file-badge" title="Trạng thái file ghi chú"></span>
+                </div>
+            </div>
+
+            
             
             ${assignment.introattachments && assignment.introattachments.length > 0 ? `
             <div class="assignment-attachments">
@@ -2524,10 +3552,188 @@ function showAssignmentDetailsPage(assignment) {
         if (!assignment.isSubmitted) {
             initializeHeaderCountdown(assignment.id, assignment.duedate);
         }
+        // Load existing notes for this assignment
+        try {
+            const enh = await window.electronAPI.getAssignmentEnhancements(String(assignment.id));
+            if (enh?.success && enh.data && typeof enh.data.notes === 'string') {
+                const ta = document.getElementById('assignment-page-notes');
+                if (ta) ta.value = enh.data.notes;
+            }
+        } catch {}
+
+        // Enhance notes UX: autosize + debounced autosave on input
+        try {
+            const ta = document.getElementById('assignment-page-notes');
+            if (ta) {
+                initAutosizeTextarea(ta);
+                const debounced = debounce((val) => saveAssignmentPageNotes(assignment.id, val), 600);
+                ta.addEventListener('input', () => debounced(ta.value));
+            }
+        } catch {}
+
+        // Update Word note indicator & delete state for assignment
+        try {
+            const settings = await window.electronAPI.getSettings();
+            const path = settings?.[`assignmentNoteDoc_${assignment.id}`];
+            const ind = document.getElementById('assignment-word-indicator');
+            const del = document.getElementById('btn-del-assignment-word');
+            if (path) {
+                if (ind) ind.textContent = 'Đã có file';
+                if (ind) ind.classList.add('success');
+                if (del) del.disabled = false;
+            } else {
+                if (ind) ind.textContent = 'Chưa có file';
+                if (ind) ind.classList.remove('success');
+                if (del) del.disabled = true;
+            }
+        } catch {}
         
     } catch (error) {
         console.error('Error in showAssignmentDetailsPage:', error);
         showNotification('Lỗi hiển thị chi tiết bài tập', 'error');
+    }
+}
+
+// Save notes from assignment details page
+async function saveAssignmentPageNotes(assignmentId, notes) {
+    try {
+        setNotesStatus('assignment-notes-status', 'Đang lưu...');
+        await window.electronAPI.setAssignmentNotes(String(assignmentId), notes || '');
+        const t = new Date();
+        setNotesStatus('assignment-notes-status', `Đã lưu lúc ${t.toLocaleTimeString('vi-VN')}`, 'success');
+    } catch (e) {
+        setNotesStatus('assignment-notes-status', 'Lỗi lưu ghi chú', 'error');
+    }
+}
+
+// Open submission (editsubmission) page in external browser
+async function openSubmission(assignmentId) {
+    try {
+        const numericId = Number(assignmentId);
+        let assignment = appState.assignments.find(a => a.id === numericId);
+        // Fallback: try load from courses
+        if (!assignment) {
+            for (const course of appState.courses) {
+                try {
+                    const list = await loadAssignmentsForCourse(course.id);
+                    const found = list.find(a => a.id === numericId);
+                    if (found) { assignment = found; break; }
+                } catch {}
+            }
+        }
+        if (!assignment) {
+            showNotification('Không tìm thấy bài tập', 'error');
+            return;
+        }
+        let openUrl = assignment.url || (assignment.cmid ? `${appState.baseUrl}/mod/assign/view.php?id=${assignment.cmid}` : null);
+        if (openUrl) {
+            // Prefer going straight to edit submission if possible
+            const sep = openUrl.includes('?') ? '&' : '?';
+            openUrl = `${openUrl}${sep}action=editsubmission`;
+            window.electronAPI.openExternal(openUrl);
+        } else {
+            showNotification('Không có liên kết nộp bài', 'warning');
+        }
+    } catch (e) {
+        console.error('openSubmission error', e);
+        showNotification('Lỗi mở trang nộp bài', 'error');
+    }
+}
+
+// Course notes helpers
+async function saveCourseNotes(courseId, notes) {
+    try {
+        setNotesStatus('course-notes-status', 'Đang lưu...');
+        await window.electronAPI.setSetting(`courseNote_${courseId}`, notes || '');
+        const t = new Date();
+        setNotesStatus('course-notes-status', `Đã lưu lúc ${t.toLocaleTimeString('vi-VN')}`, 'success');
+    } catch (e) {
+        setNotesStatus('course-notes-status', 'Lỗi lưu ghi chú môn học', 'error');
+    }
+}
+
+async function loadCourseNotes(courseId) {
+    try {
+        const val = await window.electronAPI.getSetting(`courseNote_${courseId}`);
+        const ta = document.getElementById('course-notes-textarea');
+        if (ta && typeof val === 'string') ta.value = val;
+        if (ta) {
+            initAutosizeTextarea(ta);
+            const debounced = debounce((v) => saveCourseNotes(courseId, v), 600);
+            ta.addEventListener('input', () => debounced(ta.value));
+        }
+    } catch {}
+}
+
+// Word-backed notes helpers (open/create and delete)
+async function ensureCourseNoteDoc(courseId, courseName) {
+    try {
+        setNotesStatus('course-notes-status', 'Đang mở ghi chú Word...', 'muted');
+        const res = await window.electronAPI.ensureCourseNoteDoc(String(courseId), String(courseName || ''));
+        if (res && res.success) {
+            setNotesStatus('course-notes-status', 'Đã mở ghi chú Word', 'success');
+            // Reflect badge status
+            setNotesStatus('course-word-indicator', 'Đã có file', 'success');
+            const del = document.getElementById('btn-del-course-word');
+            if (del) del.disabled = false;
+        } else if (res && res.cancelled) {
+            setNotesStatus('course-notes-status', 'Đã hủy', 'muted');
+        } else {
+            setNotesStatus('course-notes-status', 'Không thể mở ghi chú Word', 'error');
+        }
+    } catch (e) {
+        setNotesStatus('course-notes-status', 'Lỗi mở ghi chú Word', 'error');
+    }
+}
+
+async function deleteCourseNoteDoc(courseId) {
+    try {
+        const res = await window.electronAPI.deleteCourseNoteDoc(String(courseId));
+        if (res && res.success) {
+            setNotesStatus('course-notes-status', 'Đã xóa file ghi chú Word', 'success');
+            setNotesStatus('course-word-indicator', 'Chưa có file', 'muted');
+            const del = document.getElementById('btn-del-course-word');
+            if (del) del.disabled = true;
+        } else if (res && res.cancelled) {
+            setNotesStatus('course-notes-status', 'Đã hủy', 'muted');
+        }
+    } catch (e) {
+        setNotesStatus('course-notes-status', 'Lỗi xóa ghi chú Word', 'error');
+    }
+}
+
+async function ensureAssignmentNoteDoc(assignmentId, name) {
+    try {
+        setNotesStatus('assignment-notes-status', 'Đang mở ghi chú Word...', 'muted');
+        const res = await window.electronAPI.ensureAssignmentNoteDoc(String(assignmentId), String(name || ''));
+        if (res && res.success) {
+            setNotesStatus('assignment-notes-status', 'Đã mở ghi chú Word', 'success');
+            setNotesStatus('assignment-word-indicator', 'Đã có file', 'success');
+            const del = document.getElementById('btn-del-assignment-word');
+            if (del) del.disabled = false;
+        } else if (res && res.cancelled) {
+            setNotesStatus('assignment-notes-status', 'Đã hủy', 'muted');
+        } else {
+            setNotesStatus('assignment-notes-status', 'Không thể mở ghi chú Word', 'error');
+        }
+    } catch (e) {
+        setNotesStatus('assignment-notes-status', 'Lỗi mở ghi chú Word', 'error');
+    }
+}
+
+async function deleteAssignmentNoteDoc(assignmentId) {
+    try {
+        const res = await window.electronAPI.deleteAssignmentNoteDoc(String(assignmentId));
+        if (res && res.success) {
+            setNotesStatus('assignment-notes-status', 'Đã xóa file ghi chú Word', 'success');
+            setNotesStatus('assignment-word-indicator', 'Chưa có file', 'muted');
+            const del = document.getElementById('btn-del-assignment-word');
+            if (del) del.disabled = true;
+        } else if (res && res.cancelled) {
+            setNotesStatus('assignment-notes-status', 'Đã hủy', 'muted');
+        }
+    } catch (e) {
+        setNotesStatus('assignment-notes-status', 'Lỗi xóa ghi chú Word', 'error');
     }
 }
 
@@ -2546,9 +3752,9 @@ function initializeHeaderCountdown(assignmentId, dueDate) {
             return;
         }
         
-        const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+    const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
         
         const daysElement = countdownElement.querySelector('.countdown-days');
         const hoursElement = countdownElement.querySelector('.countdown-hours');
@@ -2558,10 +3764,12 @@ function initializeHeaderCountdown(assignmentId, dueDate) {
         if (hoursElement) hoursElement.textContent = hours;
         if (minutesElement) minutesElement.textContent = minutes;
         
-        // Add urgency styling
-        if (days <= 1) {
+        // Add urgency styling based on settings
+        countdownElement.classList.remove('urgent', 'warning');
+        const urgentDays = Number(appState.urgentDays) || 3;
+        if (days <= urgentDays) {
             countdownElement.classList.add('urgent');
-        } else if (days <= 3) {
+        } else if (days <= 7) {
             countdownElement.classList.add('warning');
         }
     }
@@ -2595,19 +3803,21 @@ function initializeAssignmentCountdown(assignmentId, dueDate) {
             return;
         }
         
-        const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+    const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
         
         const countdownText = countdownElement.querySelector('.countdown-text');
         if (countdownText) {
             countdownText.textContent = `${days} ngày ${hours} giờ ${minutes} phút`;
         }
         
-        // Add urgency styling
-        if (days <= 1) {
+        // Add urgency styling based on settings
+        countdownElement.classList.remove('urgent', 'warning');
+        const urgentDays = Number(appState.urgentDays) || 3;
+        if (days <= urgentDays) {
             countdownElement.classList.add('urgent');
-        } else if (days <= 3) {
+        } else if (days <= 7) {
             countdownElement.classList.add('warning');
         }
     }
@@ -2648,6 +3858,7 @@ function closeAssignmentDetails() {
 // Ensure global accessibility for inline onclick handlers
 window.openCourseDetails = openCourseDetails;
 window.openCourseInBrowser = openCourseInBrowser;
+window.openSubmission = openSubmission;
 
 function setAssignmentPriority(priority) {
     assignmentEnhancements.setPriority(priority);
@@ -3139,6 +4350,7 @@ function logout() {
     appState.lastCheckTime = null;
     appState.userGroupAssignments.clear();
     appState.currentWeek = new Date();
+    appState.currentMonth = new Date();
     appState.dashboardData = {
         urgentAssignments: [],
         upcomingAssignments: [],
@@ -3224,6 +4436,16 @@ function setupEventListeners() {
     });
     elements.courseFilter.addEventListener('change', updateAssignmentsList);
     elements.statusFilter.addEventListener('change', updateAssignmentsList);
+    // Sorting order
+    if (elements.sortOrder) {
+        elements.sortOrder.addEventListener('change', (e) => {
+            const v = e.target.value === 'farthest' ? 'farthest' : 'closest';
+            appState.sortOrder = v;
+            try { localStorage.setItem('sortOrder', v); } catch {}
+            showNotification('Đã áp dụng', 'success');
+            updateAssignmentsList();
+        });
+    }
     
     // Breadcrumb navigation
     if (elements.breadcrumbNav) {
@@ -3260,6 +4482,19 @@ function setupEventListeners() {
             filterCoursesBySemester();
         });
     }
+    // Toggle General Courses visibility
+    if (elements.toggleGeneralCourses) {
+        elements.toggleGeneralCourses.addEventListener('change', (e) => {
+            const section = document.getElementById('general-courses');
+            if (section) {
+                if (e.target.checked) section.style.display = '';
+                else section.style.display = 'none';
+                showNotification('Đã áp dụng', 'success');
+            }
+            try { localStorage.setItem('showGeneralCourses', String(e.target.checked)); } catch {}
+            updateCoursesList();
+        });
+    }
     
     // Group toggle button
     if (elements.toggleGroupBtn) {
@@ -3294,6 +4529,23 @@ function setupEventListeners() {
     
     if (elements.exportFeedBtn) {
         elements.exportFeedBtn.addEventListener('click', exportFeedData);
+    }
+
+    // Urgent days threshold setting
+    if (elements.urgentDaysThreshold) {
+        elements.urgentDaysThreshold.addEventListener('change', async (e) => {
+            const v = Math.max(1, Math.min(14, Number(e.target.value) || 3));
+            appState.urgentDays = v;
+            // persist to settings and localStorage
+            try {
+                await window.electronAPI.setSetting('urgentDaysThreshold', v);
+            } catch {}
+            try { localStorage.setItem('urgentDaysThreshold', String(v)); } catch {}
+            showNotification('Đã áp dụng', 'success');
+            updateMonthCalendar();
+            updateSmartDashboard();
+            updateAssignmentsList();
+        });
     }
 
     // App Update controls
@@ -3406,39 +4658,21 @@ function setupEventListeners() {
     if (elements.exportCalendarBtn) {
         elements.exportCalendarBtn.addEventListener('click', exportCalendar);
     }
-    
-    // Week calendar navigation
-    if (elements.prevWeek) {
-        elements.prevWeek.addEventListener('click', () => {
-            appState.currentWeek.setDate(appState.currentWeek.getDate() - 7);
-            updateWeekCalendar();
+
+    // Month calendar navigation
+    if (elements.prevMonth) {
+        elements.prevMonth.addEventListener('click', () => {
+            const d = appState.currentMonth;
+            appState.currentMonth = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+            updateMonthCalendar();
         });
     }
-    
-    if (elements.nextWeek) {
-        elements.nextWeek.addEventListener('click', () => {
-            appState.currentWeek.setDate(appState.currentWeek.getDate() + 7);
-            updateWeekCalendar();
+    if (elements.nextMonth) {
+        elements.nextMonth.addEventListener('click', () => {
+            const d = appState.currentMonth;
+            appState.currentMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+            updateMonthCalendar();
         });
-    }
-    
-    // Quick actions
-    if (elements.quickAssignments) {
-        elements.quickAssignments.addEventListener('click', () => {
-            showSection('assignments');
-        });
-    }
-    
-    if (elements.quickNotes) {
-        elements.quickNotes.addEventListener('click', openQuickNotes);
-    }
-    
-    if (elements.quickSchedule) {
-        elements.quickSchedule.addEventListener('click', openQuickSchedule);
-    }
-    
-    if (elements.quickExport) {
-        elements.quickExport.addEventListener('click', exportReport);
     }
     
     // AI Study Plan button
@@ -3489,6 +4723,9 @@ function setupEventListeners() {
                 stopPolling();
                 startPolling();
             }
+                // Init timetable UI
+                await initTimetableUI();
+
         });
     }
     if (elements.pollingInterval) {
@@ -3660,7 +4897,11 @@ async function loadCourseDetailsContent(courseId) {
         // Load course details, teachers, announcements, and contents in parallel (like @upgrade/)
         console.log('Loading course data with token:', appState.currentToken, 'courseId:', courseId);
         
-        const [courseDetails, teachers, announcements, contents] = await Promise.all([
+        let attempts = 0;
+        let courseDetails, teachers, announcements, contents;
+        while (attempts < 3) {
+            attempts++;
+            [courseDetails, teachers, announcements, contents] = await Promise.all([
             callAPI('getCourseDetails', appState.currentToken, courseId).catch(err => {
                 console.error('Error loading course details:', err);
                 return {};
@@ -3677,7 +4918,11 @@ async function loadCourseDetailsContent(courseId) {
                 console.error('Error loading course contents:', err);
                 return [];
             })
-        ]);
+            ]);
+            const empty = (!contents || contents.length === 0) && (!announcements || announcements.length === 0) && (!courseDetails || Object.keys(courseDetails).length === 0);
+            if (!empty) break;
+            console.warn(`Course content empty, retrying (${attempts}/3)...`);
+        }
         
         console.log('Course data loaded:', {
             details: courseDetails,
@@ -3742,6 +4987,14 @@ async function loadCourseDetailsContent(courseId) {
                         case 'page':
                             contentByType.pages.push(contentItem);
                             break;
+                        case 'h5pactivity':
+                        case 'hvp':
+                            // Treat H5P items as links; renderer will display a playable embed if possible
+                            contentByType.links.push({
+                                ...contentItem,
+                                type: 'h5p'
+                            });
+                            break;
                     }
                 }
             });
@@ -3789,14 +5042,19 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                     </div>
                     <div class="course-header-actions">
                         ${courseDetails.viewurl ? `
-                            <a href="${courseDetails.viewurl}" target="_blank" class="btn btn-primary">
+                            <button class="btn btn-primary course-action-btn" onclick="openCourseInBrowser(${currentCourseDetails.id})">
                                 <i class="fas fa-external-link-alt"></i>
                                 Mở web
-                            </a>
+                            </button>
+                            <button class="btn btn-outline course-action-btn" onclick="refreshCourseDetails()">
+                                <i class="fas fa-sync-alt"></i>
+                                Tải lại
+                            </button>
                         ` : ''}
                     </div>
                 </div>
             </div>
+
 
             <!-- Course Stats Grid -->
             <div class="course-stats-grid">
@@ -3837,7 +5095,23 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                     </div>
                 </div>
             </div>
-            
+
+            <!-- Course Notes Section (moved under stats) -->
+            <div class="details-section">
+                <h4><i class="fas fa-sticky-note"></i> Ghi chú môn học</h4>
+                <textarea id="course-notes-textarea" placeholder="Thêm ghi chú cho môn học này..." onchange="saveCourseNotes(${currentCourseDetails.id}, this.value)"></textarea>
+                <div class="notes-status" id="course-notes-status"></div>
+                <div class="notes-actions-row notes-actions-equal">
+                    <button class="btn btn-outline btn-small btn-note-action" id="btn-open-course-word" onclick="ensureCourseNoteDoc(${currentCourseDetails.id}, '${(currentCourseDetails.fullname||'').replace(/['"\\]/g,'') || 'Mon'}')">
+                        <i class="fas fa-file-word"></i> Mở ghi chú Word
+                    </button>
+                    <button class="btn btn-danger btn-small btn-note-action" id="btn-del-course-word" onclick="deleteCourseNoteDoc(${currentCourseDetails.id})">
+                        <i class="fas fa-trash"></i> Xóa ghi chú Word
+                    </button>
+                    <span id="course-word-indicator" class="file-badge" title="Trạng thái file ghi chú"></span>
+                </div>
+            </div>
+
             <!-- Assignments Section -->
             <div class="details-section">
                 <h4><i class="fas fa-tasks"></i> Bài tập (${assignments.length})</h4>
@@ -3853,6 +5127,17 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                                 <p class="content-description">${assignment.intro || 'Không có mô tả'}</p>
                                 <div class="content-meta">
                                     <span class="status-badge ${getAssignmentStatus(assignment)}">${getAssignmentStatusText(assignment)}</span>
+                                    <div style="margin-left:auto;display:flex;gap:8px;">
+                                        <button class="btn btn-outline btn-small" onclick="openAssignmentDetails('${assignment.id}')" title="Mở chi tiết trong ứng dụng">
+                                            <i class="fas fa-eye"></i> Chi tiết
+                                        </button>
+                                        <button class="btn btn-outline btn-small" onclick="openAssignment(${assignment.id})" title="Mở trang bài tập">
+                                            <i class="fas fa-external-link-alt"></i> Mở web
+                                        </button>
+                                        <button class="btn btn-primary btn-small" onclick="openSubmission(${assignment.id})" title="Mở trang nộp bài">
+                                            <i class="fas fa-upload"></i> Nộp bài
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         `).join('')}
@@ -3883,6 +5168,50 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                 ` : '<p class="no-content">Không có thông báo nào</p>'}
             </div>
             
+            <!-- Weekly/Section View (condensed, no H5P embed) -->
+            <div class="details-section">
+                <h4><i class="fas fa-calendar-week"></i> Nội dung theo tuần/phần</h4>
+                ${(() => {
+                    const buckets = new Map();
+                    const add = (arr, type) => {
+                        arr.forEach(it => {
+                            const key = it.sectionName || 'Chung';
+                            if (!buckets.has(key)) buckets.set(key, []);
+                            buckets.get(key).push({ ...it, _type: type });
+                        });
+                    };
+                    add(resources, 'resource');
+                    add(links.filter(l => l.type !== 'h5p'), 'link');
+                    add(pages, 'page');
+                    if (buckets.size === 0) return '<p class="no-content">Chưa có nội dung</p>';
+                    const parts = [];
+                    for (const [sec, items] of buckets.entries()) {
+                        parts.push(`
+                            <div class="content-section">
+                                <h5>${sec}</h5>
+                                <div class="content-list">
+                                    ${items.map(it => {
+                                        const link = it.url ? `<a href="${ensureUrlWithToken(it.url)}" target="_blank" rel="noopener">${it.name}</a>` : it.name;
+                                        return `
+                                            <div class="content-item">
+                                                <div class="content-item-header">
+                                                    <span class="content-type-badge ${it._type}">${it._type}</span>
+                                                    <span class="content-date">${formatDate(it.modified)}</span>
+                                                </div>
+                                                <h5 class="content-title">${link}</h5>
+                                                <div class="file-actions" style="display:flex;justify-content:flex-end;">
+                                                    ${it.url ? `<div class="content-item-actions"><button class="btn btn-outline btn-xs" style="width:auto;min-width:108px;" onclick="window.electronAPI.openExternal('${ensureUrlWithToken(it.url)}')"><i class='fas fa-external-link-alt'></i> Mở</button></div>` : ''}
+                                                </div>
+                                                ${it.description ? `<p class="content-description">${it.description}</p>` : ''}
+                                            </div>`;
+                                    }).join('')}
+                                </div>
+                            </div>`);
+                    }
+                    return parts.join('');
+                })()}
+            </div>
+
             <!-- Resources Section -->
             <div class="details-section">
                 <h4><i class="fas fa-file-alt"></i> Tài liệu (${resources.length})</h4>
@@ -3964,6 +5293,26 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
             </div>
         </div>
     `;
+    // After render, load existing course notes
+    loadCourseNotes(currentCourseDetails.id).catch(() => {});
+    // Update Word note indicator & delete button state
+    (async () => {
+        try {
+            const settings = await window.electronAPI.getSettings();
+            const path = settings?.[`courseNoteDoc_${currentCourseDetails.id}`];
+            const ind = document.getElementById('course-word-indicator');
+            const del = document.getElementById('btn-del-course-word');
+            if (path) {
+                if (ind) ind.textContent = 'Đã có file';
+                if (ind) ind.classList.add('success');
+                if (del) del.disabled = false;
+            } else {
+                if (ind) ind.textContent = 'Chưa có file';
+                if (ind) ind.classList.remove('success');
+                if (del) del.disabled = true;
+            }
+        } catch {}
+    })();
 }
 
 function closeCourseDetails() {
@@ -4132,6 +5481,30 @@ document.addEventListener('DOMContentLoaded', init);
     } catch {}
   });
 })();
+
+// Debug helper to seed deadline samples for verifying calendar colors
+// Usage in DevTools: window.__seedCalendarTestData()
+window.__seedCalendarTestData = function() {
+    try {
+        const now = new Date();
+        const toUnix = (d) => Math.floor(d.getTime() / 1000);
+        const mk = (name, daysFromNow, submitted=false) => {
+            const due = new Date(now);
+            due.setDate(due.getDate() + daysFromNow);
+            return { id: Math.floor(Math.random()*1e9), name, duedate: toUnix(due), status: submitted ? 'submitted' : 'draft', isSubmitted: submitted, isGroup: false, course: (appState.courses[0]?.id || 0) };
+        };
+        const samples = [
+            mk('Test Urgent (<=24h)', 0, false),
+            mk('Test Near (3d)', 3, false),
+            mk('Test Far (10d)', 10, false),
+            mk('Submitted (5d)', 5, true)
+        ];
+        appState.assignments = [...appState.assignments.filter(a => a.__seed !== true), ...samples.map(a => ({...a, __seed:true}))];
+        updateMonthCalendar();
+        updateSmartDashboard();
+        console.log('Seeded calendar test data');
+    } catch (e) { console.warn('Seed test data error', e); }
+};
 
 // Header course actions handlers
 // global header actions removed per design update
