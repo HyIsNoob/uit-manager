@@ -2,6 +2,21 @@
 
 Tất cả thay đổi đáng chú ý của dự án sẽ được ghi tại đây.
 
+## [2.1.0] - 2025-09-24
+
+### Mới/Thay đổi
+- Tray & chạy nền: đóng cửa sổ sẽ ẩn xuống khay, click biểu tượng để mở lại.
+- Thông báo tối giản: chỉ thông báo bài tập mới xuất hiện trong khi app đang chạy; không bắn lại lịch sử khi mở app.
+- Thêm cài đặt "Thu nhỏ xuống khay khi đóng" và "Bỏ qua mục cũ quá (ngày)".
+- Rút ngắn thời lượng thông báo: in-app toast ~3s; Windows toast 3s.
+- Đồng hồ hệ thống trên header: hiển thị HH:MM • Th X, dd/mm/yyyy.
+- Sửa hiển thị TKB dark mode: loại đường kẻ/hairlines.
+
+### Sửa lỗi/Ổn định
+- Tránh spam thông báo khi mở lại ứng dụng.
+
+---
+
 ## [2.0.0] - 2025-09-24
 
 ### Thay đổi
