@@ -2,7 +2,7 @@
 
 Tất cả thay đổi đáng chú ý của dự án sẽ được ghi tại đây.
 
-## [Unreleased]
+## [2.0.0] - 2025-09-24
 
 ### Thay đổi
 - UI: Thay lịch tuần bằng lịch tháng có thứ, thêm legend (Khẩn cấp/Sắp tới/Đã nộp/Nhóm) và đếm số bài tập theo ngày; có điều hướng tháng trước/sau.
@@ -13,7 +13,6 @@ Tất cả thay đổi đáng chú ý của dự án sẽ được ghi tại đ�
 - Trải nghiệm trực quan: highlight tiết hiện tại và môn đang diễn ra theo thời gian thực.
 
 ### Tính năng mới / Thay đổi lớn
-- Thay cơ chế parse `.ics`: nhận dạng chuẩn chuỗi tiết liên tiếp ("123", "678", "90", "10", "910"...), map chính xác Tiết 9–10, bỏ quy ước cũ Tiết 0 = 9.
 - Trích xuất thêm: Mã môn (`CODE.Qxx`), Giảng viên, Phòng học, dải tiết; lưu vào cấu trúc `timetableEvents`.
 - UI card môn học trong TKB: Mã môn (đậm), Tên rút gọn, Phòng (đậm), Giảng viên; ẩn dòng Tiết nếu không cần thiết (có thể bật lại dễ dàng qua CSS).
 - Lưu trữ cục bộ giảm thời gian load danh sách bài tập
@@ -22,27 +21,9 @@ Tất cả thay đổi đáng chú ý của dự án sẽ được ghi tại đ�
 - Thêm hệ thống sắp đến dealine, hệ thống ghim bài tập, hệ thống ghi chú thông qua word
 - Các thay đổi về UI/UX khác
 
-### Cải tiến
-- Logic highlight cập nhật mỗi phút; không gây reflow nặng (chỉ toggle class).
-- Tối ưu render timetable: chỉ tính toán hàng/column một lần theo periods -> `grid-row`/`grid-column` rõ ràng, không còn rowspan phức tạp như dạng bảng.
-- Cơ chế màu dùng CSS variables (`--ev-bg`, `--ev-border`, `--ev-accent`) giúp dễ mở rộng theme sau này.
-- Đồng bộ màu sang danh sách môn học (áp lớp phủ mờ nếu khớp mã).
-
-### Kỹ thuật / Nội bộ
-- Thêm `courseColors` vào state + persist qua `setSetting('courseColors', ...)`.
-- Bổ sung helper `setCourseColor(code, colorHex)` phục vụ UI hoặc script tương lai.
-- Refactor parse ICS: gom logic phân tích RRULE, periods, chuẩn hóa ngày bắt đầu/kết thúc.
-- Thêm bộ nhận diện tiết qua minutes fallback nếu thiếu chuỗi "Tiết".
-
-### Khả năng mở rộng tương lai (gợi ý)
-- Thêm prev/next week navigation (cấu trúc đã sẵn `initWeek/shiftWeek`).
-- Tooltip đầy đủ (DESCRIPTION) khi hover.
-- Đồng bộ màu theo danh sách tự đặt palette, xuất/nhập cấu hình.
-
 ### Ghi chú nâng cấp
 - Người dùng bản 1.x nâng cấp thẳng lên 2.0.0: dữ liệu bài tập và token không bị ảnh hưởng.
-- Nếu đã tùy chỉnh file `.ics` cũ: chỉ cần import lại để áp dụng parser mới (không bắt buộc). 
-
+- Nếu đã tùy chỉnh file `.ics` cũ: chỉ cần import lại để áp dụng parser mới (không bắt buộc).
 ---
 
 ## [1.2.0] - 2025-09-22
