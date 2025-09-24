@@ -174,18 +174,7 @@ async function applyThemeFromSettings() {
         const settings = await window.electronAPI.getSettings();
         const theme = settings?.theme || 'light';
         document.documentElement.setAttribute('data-theme', theme);
-        const toggle = document.getElementById('theme-toggle');
-        if (toggle) {
-            const icon = toggle.querySelector('i');
-            const label = toggle.querySelector('span');
-            if (theme === 'dark') {
-                icon.className = 'fas fa-sun';
-                label.textContent = 'Light mode';
-            } else {
-                icon.className = 'fas fa-moon';
-                label.textContent = 'Dark mode';
-            }
-        }
+        // theme button removed from header; theme lives in settings
         // Apply TLS toggle UI
         if (elements.allowInsecureTLS) {
             elements.allowInsecureTLS.checked = Boolean(settings?.allowInsecureTLS);
@@ -212,12 +201,11 @@ async function applyThemeFromSettings() {
     }
 }
 
-async function toggleTheme() {
+async function toggleThemeInSettings() {
     const current = document.documentElement.getAttribute('data-theme') || 'light';
     const next = current === 'light' ? 'dark' : 'light';
     document.documentElement.setAttribute('data-theme', next);
     await window.electronAPI.setSetting('theme', next);
-    applyThemeFromSettings();
 }
 
 // Utility functions
@@ -918,6 +906,8 @@ function updateMonthCalendar() {
     const year = appState.currentMonth.getFullYear();
     const month = appState.currentMonth.getMonth();
     const firstDay = new Date(year, month, 1);
+    // Align Monday as 0..Sunday as 6 consistently; avoid TZ drift by using noon
+    firstDay.setHours(12,0,0,0);
     const startDayOfWeek = (firstDay.getDay() + 6) % 7; // Mon=0..Sun=6
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const prevMonthDays = new Date(year, month, 0).getDate();
@@ -992,6 +982,7 @@ function updateMonthCalendar() {
 
     for (let i = leadingDays; i > 0; i--) {
         const d = new Date(year, month - 1, prevMonthDays - i + 1);
+        d.setHours(12,0,0,0);
         const { dots, count, bgClass } = getDotsForDate(d);
         html += `
         <div class="month-day other-month ${bgClass}" data-date="${d.toISOString().split('T')[0]}">
@@ -1005,6 +996,7 @@ function updateMonthCalendar() {
 
     for (let day = 1; day <= daysInMonth; day++) {
         const d = new Date(year, month, day);
+        d.setHours(12,0,0,0);
         const isToday = d.toDateString() === todayStr;
         const { dots, count, bgClass } = getDotsForDate(d);
         html += `
@@ -1021,6 +1013,7 @@ function updateMonthCalendar() {
     const trailing = (7 - (totalCellsSoFar % 7)) % 7;
     for (let i = 1; i <= trailing; i++) {
         const d = new Date(year, month + 1, i);
+        d.setHours(12,0,0,0);
         const { dots, count, bgClass } = getDotsForDate(d);
         html += `
         <div class="month-day other-month ${bgClass}" data-date="${d.toISOString().split('T')[0]}">
@@ -1137,11 +1130,11 @@ function updateSemesterFilter() {
         });
     }
 
-    // Auto-select newest semester if available
+    // Keep previous behavior (no auto filtering on init beyond populating lists)
     if (sorted.length > 0) {
         elements.semesterFilter.value = String(sorted[0].id);
     }
-    // Update course filter based on selected semester
+    // Only refresh pickers/lists as before
     handleSemesterChangeForCourses();
 }
 
@@ -1346,7 +1339,7 @@ async function updateAssignmentsList() {
 
             const pinned = appState.pinnedAssignments.has(String(assignment.id));
             return `
-                <div class="assignment-card ${statusClass} ${urgencyClass}" data-assign-id="${assignment.id}">
+                <div class="assignment-card ${statusClass} ${urgencyClass}" data-assign-id="${assignment.id}" onclick="openAssignmentDetails('${assignment.id}')" style="cursor:pointer">
                     <div class="assignment-header">
                         <div class="assignment-title">
                             ${assignment.isGroup ? '<i class="fas fa-users" style="margin-right: 8px; color: var(--group);"></i>' : ''}
@@ -1959,7 +1952,8 @@ function renderTimetable() {
     const colorSettings = window.__courseColors || appState.courseColors || {};
     const clr = ev.code && colorSettings[ev.code] ? colorSettings[ev.code] : null;
     const styleVars = clr ? `--ev-bg:${clr.bg};--ev-border:${clr.border||clr.bg};--ev-accent:${clr.accent||clr.bg}` : '';
-    html += `<div class=\"tt-event\" style=\"grid-column:${col};grid-row:${rowStart}/${rowEnd};\">`+
+    const onclick = ev.code ? ` onclick=\"openCourseByCode('${(ev.code||'').replace(/'/g, "\\'")}')\"` : '';
+    html += `<div class=\"tt-event\" style=\"grid-column:${col};grid-row:${rowStart}/${rowEnd};\"${onclick}>`+
         `<div class=\"tt-event-inner\" data-color style=\"${styleVars}\">`+
         codeHtml + nameHtml +
         `<div class=\"tt-event-periods\">${pLabel}</div>`+
@@ -2051,9 +2045,36 @@ function attachCourseColorPickers() {
             const code = codeEl ? codeEl.textContent.trim() : null;
             if (code) openCourseColorModal(code);
         });
+        // Single click opens course details by code
+        div.addEventListener('click', (e) => {
+            // Prevent interfering with double-click color picker: small delay guard
+            if (div.__dblClickTimeout) return;
+            div.__dblClickTimeout = setTimeout(() => { delete div.__dblClickTimeout; }, 250);
+            const codeEl = div.querySelector('.tt-event-code');
+            const code = codeEl ? codeEl.textContent.trim() : null;
+            if (code) openCourseByCode(code);
+        });
     });
     // course list items coloring (applied each render assign tasks etc). We add class & style
     applyCourseColorsToLists();
+}
+
+// Open course details by code referenced in timetable
+function openCourseByCode(code) {
+    if (!code) return;
+    const norm = code.trim().toUpperCase();
+    // Try exact match first: by shortname startswith or includes
+    let course = appState.courses.find(c => String(c.shortname||'').toUpperCase().includes(norm));
+    if (!course) {
+        // Fallback: try fullname contains code segment before '.'
+        const core = norm.split('.')[0];
+        course = appState.courses.find(c => String(c.fullname||'').toUpperCase().includes(core));
+    }
+    if (course) {
+        openCourseDetails(course.id);
+        return;
+    }
+    showNotification('Không tìm thấy môn tương ứng', 'warning');
 }
 
 function applyCourseColorsToLists() {
@@ -2421,6 +2442,17 @@ async function initializeApp() {
 
         // Start realtime clock
         startRealtimeClock();
+
+    // Scroll-to-top button
+    (function initScrollTop(){
+        const btn = document.getElementById('scroll-top-btn');
+        if (!btn) return;
+        btn.addEventListener('click', () => window.scrollTo({ top:0, behavior:'smooth' }));
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 400) btn.style.display = 'inline-flex';
+            else btn.style.display = 'none';
+        }, { passive:true });
+    })();
 
         // Wire auto-start checkbox
         if (elements.autoStartWindows) {
@@ -4730,11 +4762,9 @@ function setupEventListeners() {
     // Change account
     elements.changeAccountBtn.addEventListener('click', logout);
 
-    // Theme toggle
-    const themeToggle = document.getElementById('theme-toggle');
-    if (themeToggle) {
-        themeToggle.addEventListener('click', toggleTheme);
-    }
+    // Settings theme toggle
+    const settingsThemeBtn = document.getElementById('settings-theme-toggle');
+    if (settingsThemeBtn) settingsThemeBtn.addEventListener('click', toggleThemeInSettings);
     
     // Sidebar user profile click
     const userProfile = document.querySelector('.user-profile');
@@ -5112,7 +5142,7 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
 
             <!-- Course Stats Grid -->
             <div class="course-stats-grid">
-                <div class="stat-card">
+                <div class="stat-card" onclick="scrollToCourseSection('cd-assignments-section')" style="cursor:pointer">
                     <div class="stat-icon">
                         <i class="fas fa-tasks"></i>
                     </div>
@@ -5121,7 +5151,7 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                         <div class="stat-label">Bài tập</div>
                     </div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card" onclick="scrollToCourseSection('cd-announcements-section')" style="cursor:pointer">
                     <div class="stat-icon">
                         <i class="fas fa-bullhorn"></i>
                     </div>
@@ -5130,7 +5160,7 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                         <div class="stat-label">Thông báo</div>
                     </div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card" onclick="scrollToCourseSection('cd-resources-section')" style="cursor:pointer">
                     <div class="stat-icon">
                         <i class="fas fa-file-alt"></i>
                     </div>
@@ -5139,7 +5169,7 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                         <div class="stat-label">Tài liệu</div>
                     </div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card" onclick="scrollToCourseSection('cd-links-section')" style="cursor:pointer">
                     <div class="stat-icon">
                         <i class="fas fa-link"></i>
                     </div>
@@ -5166,9 +5196,10 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                 </div>
             </div>
 
-            <!-- Assignments Section -->
-            <div class="details-section">
-                <h4><i class="fas fa-tasks"></i> Bài tập (${assignments.length})</h4>
+            <!-- Collapsible Sections (default collapsed) -->
+            <div id="cd-assignments-section" class="details-section collapsible">
+                <div class="collapsible-header"><h4><i class="fas fa-tasks"></i> Bài tập (${assignments.length})</h4><i class="fas fa-chevron-down"></i></div>
+                <div class="collapsible-body">
                 ${assignments.length > 0 ? `
                     <div class="content-list">
                         ${assignments.map(assignment => `
@@ -5197,11 +5228,12 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                         `).join('')}
                     </div>
                 ` : '<p class="no-content">Không có bài tập nào</p>'}
+                </div>
             </div>
-            
-            <!-- Announcements Section -->
-            <div class="details-section">
-                <h4><i class="fas fa-bullhorn"></i> Thông báo (${announcements.length})</h4>
+
+            <div id="cd-announcements-section" class="details-section collapsible">
+                <div class="collapsible-header"><h4><i class="fas fa-bullhorn"></i> Thông báo (${announcements.length})</h4><i class="fas fa-chevron-down"></i></div>
+                <div class="collapsible-body">
                 ${announcements.length > 0 ? `
                     <div class="content-list">
                         ${announcements.map(announcement => `
@@ -5220,11 +5252,54 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                         `).join('')}
                     </div>
                 ` : '<p class="no-content">Không có thông báo nào</p>'}
+                </div>
             </div>
-            
-            <!-- Weekly/Section View (condensed, no H5P embed) -->
-            <div class="details-section">
-                <h4><i class="fas fa-calendar-week"></i> Nội dung theo tuần/phần</h4>
+
+            <div id="cd-resources-section" class="details-section collapsible">
+                <div class="collapsible-header"><h4><i class="fas fa-file-alt"></i> Tài liệu (${resources.length})</h4><i class="fas fa-chevron-down"></i></div>
+                <div class="collapsible-body">
+                ${resources.length > 0 ? `
+                    <div class="content-list">
+                        ${resources.map(resource => `
+                            <div class="content-item">
+                                <div class="content-item-header">
+                                    <span class="content-type-badge resource">Tài liệu</span>
+                                    <span class="content-date">${formatDate(resource.added)}</span>
+                                </div>
+                                <h5 class="content-title">
+                                    ${resource.url ? `<a href="${ensureUrlWithToken(resource.url)}" target="_blank" rel="noopener">${resource.name}</a>` : resource.name}
+                                </h5>
+                                <p class="content-description">${resource.description || 'Không có mô tả'}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '<p class="no-content">Không có tài liệu nào</p>'}
+                </div>
+            </div>
+
+            <div id="cd-links-section" class="details-section collapsible">
+                <div class="collapsible-header"><h4><i class="fas fa-link"></i> Liên kết (${links.length})</h4><i class="fas fa-chevron-down"></i></div>
+                <div class="collapsible-body">
+                ${links.length > 0 ? `
+                    <div class="content-list">
+                        ${links.map(item => `
+                            <div class="content-item">
+                                <div class="content-item-header">
+                                    <span class="content-type-badge link">Liên kết</span>
+                                    <span class="content-date">${formatDate(item.modified)}</span>
+                                </div>
+                                <h5 class="content-title">${item.name}</h5>
+                                <p class="content-description">${item.description || 'Không có mô tả'}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '<p class="no-content">Không có liên kết nào</p>'}
+                </div>
+            </div>
+
+            <div id="cd-weekly-section" class="details-section collapsible">
+                <div class="collapsible-header"><h4><i class="fas fa-calendar-week"></i> Nội dung theo tuần/phần</h4><i class="fas fa-chevron-down"></i></div>
+                <div class="collapsible-body">
                 ${(() => {
                     const buckets = new Map();
                     const add = (arr, type) => {
@@ -5253,10 +5328,6 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                                                     <span class="content-date">${formatDate(it.modified)}</span>
                                                 </div>
                                                 <h5 class="content-title">${link}</h5>
-                                                <div class="file-actions" style="display:flex;justify-content:flex-end;">
-                                                    ${it.url ? `<div class="content-item-actions"><button class="btn btn-outline btn-xs" style="width:auto;min-width:108px;" onclick="window.electronAPI.openExternal('${ensureUrlWithToken(it.url)}')"><i class='fas fa-external-link-alt'></i> Mở</button></div>` : ''}
-                                                </div>
-                                                ${it.description ? `<p class="content-description">${it.description}</p>` : ''}
                                             </div>`;
                                     }).join('')}
                                 </div>
@@ -5264,69 +5335,12 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                     }
                     return parts.join('');
                 })()}
+                </div>
             </div>
 
-            <!-- Resources Section -->
-            <div class="details-section">
-                <h4><i class="fas fa-file-alt"></i> Tài liệu (${resources.length})</h4>
-                ${resources.length > 0 ? `
-                    <div class="content-list">
-                        ${resources.map(resource => `
-                            <div class="content-item">
-                                <div class="content-item-header">
-                                    <span class="content-type-badge resource">Tài liệu</span>
-                                    <span class="content-date">${formatDate(resource.added)}</span>
-                                </div>
-                                <h5 class="content-title">
-                                    ${resource.url ? `<a href="${ensureUrlWithToken(resource.url)}" target="_blank" rel="noopener">${resource.name}</a>` : resource.name}
-                                </h5>
-                                <p class="content-description">${resource.description || 'Không có mô tả'}</p>
-                                ${resource.contents && resource.contents.length > 0 ? `
-                                    <div class="resource-files">
-                                        <h6>Files:</h6>
-                                        <ul class="file-list">
-                                            ${resource.contents.map(file => `
-                                                <li>
-                                                    <a href="${ensureUrlWithToken(file.proxyurl || file.moodleurl || file.fileurl || '#')}" target="_blank" rel="noopener">
-                                                        ${file.filename || file.filepath || 'file'}
-                                                    </a>
-                                                    ${file.filesize ? ` <small>(${Math.round(file.filesize/1024)} KB)</small>` : ''}
-                                                </li>
-                                            `).join('')}
-                                        </ul>
-                                    </div>
-                                ` : ''}
-                            </div>
-                        `).join('')}
-                    </div>
-                ` : '<p class="no-content">Không có tài liệu nào</p>'}
-            </div>
-            
-            <!-- Links Section -->
-            <div class="details-section">
-                <h4><i class="fas fa-link"></i> Liên kết (${links.length})</h4>
-                ${links.length > 0 ? `
-                    <div class="content-list">
-                        ${links.map(item => `
-                            <div class="content-item">
-                                <div class="content-item-header">
-                                    <span class="content-type-badge link">Liên kết</span>
-                                    <span class="content-date">${formatDate(item.modified)}</span>
-                                </div>
-                                <h5 class="content-title">${item.name}</h5>
-                                <p class="content-description">${item.description || 'Không có mô tả'}</p>
-                                <div class="content-meta">
-                                    <span>Phần: ${item.sectionName}</span>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                ` : '<p class="no-content">Không có liên kết nào</p>'}
-            </div>
-            
-            <!-- Pages Section -->
-            <div class="details-section">
-                <h4><i class="fas fa-file-text"></i> Trang (${pages.length})</h4>
+            <div id="cd-pages-section" class="details-section collapsible">
+                <div class="collapsible-header"><h4><i class="fas fa-file-text"></i> Trang (${pages.length})</h4><i class="fas fa-chevron-down"></i></div>
+                <div class="collapsible-body">
                 ${pages.length > 0 ? `
                     <div class="content-list">
                         ${pages.map(item => `
@@ -5337,13 +5351,11 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                                 </div>
                                 <h5 class="content-title">${item.name}</h5>
                                 <p class="content-description">${item.description || 'Không có mô tả'}</p>
-                                <div class="content-meta">
-                                    <span>Phần: ${item.sectionName}</span>
-                                </div>
                             </div>
                         `).join('')}
                     </div>
                 ` : '<p class="no-content">Không có trang nào</p>'}
+                </div>
             </div>
         </div>
     `;
@@ -5367,6 +5379,9 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
             }
         } catch {}
     })();
+
+    // Initialize collapsible sections and stat card scroll
+    try { initCourseDetailCollapsibles(); } catch (e) { console.warn('init collapsibles failed', e); }
 }
 
 function closeCourseDetails() {
@@ -5379,6 +5394,109 @@ function closeCourseDetails() {
 function refreshCourseDetails() {
     if (currentCourseDetails) {
         loadCourseDetailsContent(currentCourseDetails.id);
+    }
+}
+
+// Collapsible helpers and stat scroll
+function toggleCourseSection(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // Ensure body exists and is display:block to allow transition
+    const body = el.querySelector('.collapsible-body');
+    if (el.classList.contains('open')) {
+        el.classList.remove('open');
+    } else {
+        if (body) body.style.display = 'block';
+        el.classList.add('open');
+        // cleanup inline after transition
+        setTimeout(() => { if (body) body.style.removeProperty('display'); }, 350);
+    }
+}
+
+function scrollToCourseSection(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // collapse others first to keep page compact
+    document.querySelectorAll('.details-section.collapsible').forEach(sec => {
+        if (sec.id !== id) sec.classList.remove('open');
+    });
+    el.classList.add('open');
+    const header = el.querySelector('.collapsible-header') || el;
+    const body = el.querySelector('.collapsible-body');
+    if (body) body.style.display = 'block';
+    const y = header.getBoundingClientRect().top + window.scrollY - 80; // keep title visible
+    window.scrollTo({ top: y, behavior: 'smooth' });
+    // clean inline style after a short delay to let CSS take over
+    setTimeout(() => { if (body) body.style.removeProperty('display'); }, 400);
+}
+
+// Expose for inline handlers
+window.toggleCourseSection = toggleCourseSection;
+window.scrollToCourseSection = scrollToCourseSection;
+
+function initCourseDetailCollapsibles() {
+    const root = elements.courseDetailsContent.querySelector('.course-details-content');
+    if (!root) return;
+    // Map headings to stable IDs
+    const map = [
+        { key: 'Bài tập', id: 'cd-assignments-section' },
+        { key: 'Thông báo', id: 'cd-announcements-section' },
+        { key: 'Tài liệu', id: 'cd-resources-section' },
+        { key: 'Liên kết', id: 'cd-links-section' },
+        { key: 'Nội dung theo tuần/phần', id: 'cd-weekly-section' },
+        { key: 'Trang', id: 'cd-pages-section' }
+    ];
+    const sections = Array.from(root.querySelectorAll('.details-section'));
+    sections.forEach(sec => {
+        const h = sec.querySelector('h4');
+        if (!h) return;
+        const label = h.textContent || '';
+        const hit = map.find(m => label.includes(m.key));
+        if (!hit) return;
+        sec.id = hit.id;
+        // If Prebuilt with collapsible markup, only bind header
+        if (sec.classList.contains('collapsible')) {
+            const header = sec.querySelector('.collapsible-header');
+            if (header && !header.__bound) {
+                header.__bound = true;
+                header.addEventListener('click', () => toggleCourseSection(hit.id));
+            }
+            return;
+        }
+        // Legacy: convert
+        sec.classList.add('collapsible');
+        const chevron = document.createElement('i');
+        chevron.className = 'fas fa-chevron-down';
+        const header = document.createElement('div');
+        header.className = 'collapsible-header';
+        header.appendChild(h.cloneNode(true));
+        header.appendChild(chevron);
+        const body = document.createElement('div');
+        body.className = 'collapsible-body';
+        const toMove = [];
+        Array.from(sec.childNodes).forEach(n => { if (n !== h) toMove.push(n); });
+        toMove.forEach(n => body.appendChild(n));
+        sec.innerHTML = '';
+        sec.appendChild(header);
+        sec.appendChild(body);
+        header.addEventListener('click', () => toggleCourseSection(hit.id));
+    });
+    // Generic safety binding for all collapsible headers
+    root.querySelectorAll('.details-section.collapsible .collapsible-header').forEach(header => {
+        if (header.__bound) return; header.__bound = true;
+        const parent = header.closest('.details-section.collapsible');
+        if (!parent.id) return;
+        header.addEventListener('click', () => toggleCourseSection(parent.id));
+    });
+    // Stats card programmatic binding fallback
+    const grid = root.querySelector('.course-stats-grid');
+    if (grid) {
+        const cards = grid.querySelectorAll('.stat-card');
+        const ids = ['cd-assignments-section','cd-announcements-section','cd-resources-section','cd-links-section'];
+        cards.forEach((card, idx) => {
+            card.style.cursor = 'pointer';
+            card.addEventListener('click', () => scrollToCourseSection(ids[idx]));
+        });
     }
 }
 

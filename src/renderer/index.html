@@ -9,9 +9,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
-    <button id="theme-toggle" class="btn btn-outline" style="position:fixed; right:16px; bottom:16px; z-index:1000; width:auto;">
-        <i class="fas fa-moon"></i>
-        <span>Dark mode</span>
+    <button id="scroll-top-btn" class="btn btn-outline" title="Lên đầu trang">
+        <i class="fas fa-arrow-up"></i>
     </button>
     <!-- Loading Screen -->
     <div id="loading-screen" class="loading-screen">
@@ -109,6 +108,10 @@
                 <h1>UIT Assignment Manager</h1>
             </div>
             <div class="header-right">
+                <button id="scroll-top-btn" class="btn btn-outline" style="position:fixed; right:16px; bottom:64px; z-index:1000; width:auto; display:none;">
+                    <i class="fas fa-arrow-up"></i>
+                    Lên đầu trang
+                </button>
                 <div class="user-info" id="realtime-clock" title="Giờ hệ thống">
                     <i class="fas fa-clock"></i>
                     <span id="clock-text">--:--:--</span>
@@ -509,6 +512,12 @@
                         
                         <div class="settings-card">
                             <h3>Ứng dụng</h3>
+                            <div class="setting-item">
+                                <label>Giao diện</label>
+                                <button id="settings-theme-toggle" class="btn btn-outline btn-small" title="Đổi Dark/Light">
+                                    <i class="fas fa-adjust"></i> Đổi Dark/Light
+                                </button>
+                            </div>
                             <div class="setting-item">
                                 <label>Base URL Moodle</label>
                                 <input type="text" id="base-url-input" placeholder="https://courses.uit.edu.vn" style="width:60%" />

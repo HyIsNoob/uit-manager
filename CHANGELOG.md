@@ -1,3 +1,18 @@
+## [2.2.0] - 2025-09-24
+
+### Mới/Thay đổi
+- Chi tiết môn: thêm các vùng thu gọn/mở rộng (Bài tập, Thông báo, Tài liệu, Liên kết, Nội dung theo tuần/phần, Trang) kèm animation mượt.
+- Stat cards cuộn đến đúng vùng (giữ tiêu đề hiển thị), tự mở vùng mục tiêu.
+- Nút “Lên đầu trang” dạng icon tròn, nổi góc phải dưới, chỉ hiện khi cuộn.
+- Di chuyển Dark/Light toggle vào phần Cài đặt.
+- Quản lý bài tập: click vào card để mở chi tiết bài tập nhanh.
+
+### Sửa lỗi
+- Sửa lệch click 1 ngày trên lịch tháng; click đúng ngày mở đúng nội dung.
+- Sửa đường kẻ TKB đè lên block môn ở dark mode; tăng z-index và mask.
+- Ổn định hệ thống thông báo: chỉ thông báo bài tập mới trong phiên đang chạy; rút ngắn thời lượng toast.
+
+---
 # Changelog
 
 Tất cả thay đổi đáng chú ý của dự án sẽ được ghi tại đây.
