@@ -8,8 +8,6 @@ Tất cả thay đổi đáng chú ý của dự án sẽ được ghi tại đ�
 - UI: Thay lịch tuần bằng lịch tháng có thứ, thêm legend (Khẩn cấp/Sắp tới/Đã nộp/Nhóm) và đếm số bài tập theo ngày; có điều hướng tháng trước/sau.
 - UI: Gỡ bỏ hoàn toàn phần "Thao tác nhanh" và các modal liên quan (Quick Notes/Schedule) để giao diện gọn nhẹ hơn.
 
-## [2.0.0] - 2025-09-24
-
 ### Điểm nổi bật
 - Module Thời khóa biểu (TKB) mới hoàn toàn: render bằng CSS Grid, hiển thị ngày theo hàng ngang, các môn học tự gộp nhiều tiết theo đúng chuỗi "Tiết" trong file .ics.
 - Trải nghiệm trực quan: highlight tiết hiện tại và môn đang diễn ra theo thời gian thực.
