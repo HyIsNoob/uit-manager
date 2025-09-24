@@ -1,3 +1,10 @@
+## [2.2.1] - 2025-09-24
+
+### Hotfix
+- Chặn mở nhiều instance ứng dụng (single-instance lock). Nếu mở lại khi đang chạy nền, ứng dụng sẽ focus/hiện cửa sổ hiện có.
+
+---
+
 ## [2.2.0] - 2025-09-24
 
 ### Mới/Thay đổi

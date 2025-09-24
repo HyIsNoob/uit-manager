@@ -1818,7 +1818,22 @@ ipcMain.handle('get-app-version', () => {
   }
 });
 
-app.whenReady().then(() => {
+// Enforce single instance
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    try {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    } catch {}
+  });
+
+  app.whenReady().then(() => {
   createWindow();
   notificationManager.init();
 
@@ -1851,7 +1866,8 @@ app.whenReady().then(() => {
   } catch (e) {
     console.warn('Tray init failed:', e.message);
   }
-});
+  });
+}
 
 // Auto-start with Windows
 ipcMain.handle('get-auto-start', async () => {
