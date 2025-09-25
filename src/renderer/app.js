@@ -1227,8 +1227,10 @@ async function updateAssignmentsList() {
         
         // Process assignments with group detection
         let processedAssignments = assignments.map((assignment, idx) => {
-            const userMark = Boolean(userGroupMap[String(assignment.id)]);
-            const isGroup = userMark || isGroupAssignment(assignment);
+            const userMark = userGroupMap[String(assignment.id)];
+            // User choice takes precedence over auto-detection
+            // If user has explicitly set it (true/false), use that; otherwise use auto-detection
+            const isGroup = userMark !== undefined ? Boolean(userMark) : isGroupAssignment(assignment);
             const submissionStatus = statuses[idx]?.lastattempt?.submission?.status || 'draft';
             const submission = statuses[idx]?.lastattempt?.submission || null;
             
@@ -1266,24 +1268,44 @@ async function updateAssignmentsList() {
             });
         }
         
-        // Sort by due date with pinned on top
+        // Sort by due date or creation date with pinned on top, expired assignments at bottom
         const nowTs = Date.now();
-        const sortDir = (appState.sortOrder === 'farthest') ? 1 : -1; // closest => ascending time to due
-        const dueMs = (a) => (a.duedate ? (a.duedate * 1000) : Number.MAX_SAFE_INTEGER);
-        const timeTo = (a) => (dueMs(a) - nowTs);
         const isPinned = (a) => appState.pinnedAssignments.has(String(a.id));
+        const isExpired = (a) => a.duedate && (a.duedate * 1000) < nowTs;
+        const isSubmitted = (a) => a.status === 'submitted';
+        
         filteredAssignments.sort((a, b) => {
             // Pinned first
             const pa = isPinned(a) ? 1 : 0;
             const pb = isPinned(b) ? 1 : 0;
             if (pa !== pb) return pb - pa; // pinned (1) before not (0)
-            // Then by due time ascending for closest, descending for farthest
-            const ta = timeTo(a);
-            const tb = timeTo(b);
-            if (isNaN(ta) && isNaN(tb)) return 0;
-            if (isNaN(ta)) return 1;
-            if (isNaN(tb)) return -1;
-            return (ta - tb) * (sortDir * -1);
+            
+            // Expired and submitted assignments go to bottom (only for due date sorting)
+            if (appState.sortOrder === 'closest' || appState.sortOrder === 'farthest') {
+                const aExpired = isExpired(a) && isSubmitted(a);
+                const bExpired = isExpired(b) && isSubmitted(b);
+                if (aExpired !== bExpired) return aExpired - bExpired; // expired (true=1) after not expired (false=0)
+            }
+            
+            // Sort by different criteria based on sortOrder
+            if (appState.sortOrder === 'newest' || appState.sortOrder === 'oldest') {
+                // Sort by creation date (timecreated)
+                const aCreated = a.timecreated ? (a.timecreated * 1000) : 0;
+                const bCreated = b.timecreated ? (b.timecreated * 1000) : 0;
+                const sortDir = (appState.sortOrder === 'newest') ? -1 : 1; // newest = descending, oldest = ascending
+                return (aCreated - bCreated) * sortDir;
+            } else {
+                // Sort by due date (existing logic)
+                const sortDir = (appState.sortOrder === 'farthest') ? 1 : -1; // closest => ascending time to due
+                const dueMs = (a) => (a.duedate ? (a.duedate * 1000) : Number.MAX_SAFE_INTEGER);
+                const timeTo = (a) => (dueMs(a) - nowTs);
+                const ta = timeTo(a);
+                const tb = timeTo(b);
+                if (isNaN(ta) && isNaN(tb)) return 0;
+                if (isNaN(ta)) return 1;
+                if (isNaN(tb)) return -1;
+                return (ta - tb) * (sortDir * -1);
+            }
         });
 
         // Merge processed items back into appState.assignments to keep dashboard/calendar in sync
@@ -1339,7 +1361,7 @@ async function updateAssignmentsList() {
 
             const pinned = appState.pinnedAssignments.has(String(assignment.id));
             return `
-                <div class="assignment-card ${statusClass} ${urgencyClass}" data-assign-id="${assignment.id}" onclick="openAssignmentDetails('${assignment.id}')" style="cursor:pointer">
+                <div class="assignment-card ${statusClass} ${urgencyClass}" data-assign-id="${assignment.id}">
                     <div class="assignment-header">
                         <div class="assignment-title">
                             ${assignment.isGroup ? '<i class="fas fa-users" style="margin-right: 8px; color: var(--group);"></i>' : ''}
@@ -2393,7 +2415,7 @@ async function initializeApp() {
         } catch {}
         // Load sort order
         const savedSort = localStorage.getItem('sortOrder');
-        if (savedSort === 'closest' || savedSort === 'farthest') {
+        if (savedSort === 'closest' || savedSort === 'farthest' || savedSort === 'newest' || savedSort === 'oldest') {
             appState.sortOrder = savedSort;
         }
         
@@ -2898,7 +2920,7 @@ function openCalendarDayPicker(isoDate, items) {
     const title = modal.querySelector('.modal-header h3');
     if (title) title.textContent = `Bài tập ngày ${d.toLocaleDateString('vi-VN')}`;
     body.innerHTML = items.map(a => `
-        <div class="content-item" style="cursor:pointer" onclick="(function(){ document.getElementById('calendar-day-modal').classList.add('hidden'); openAssignmentDetails('${a.id}'); })()">
+        <div class="content-item">
             <div class="content-item-header">
                 <span class="content-type-badge assignment">Bài tập</span>
                 <span class="content-date">${new Date(a.duedate*1000).toLocaleTimeString('vi-VN')}</span>
@@ -4525,7 +4547,8 @@ function setupEventListeners() {
     // Sorting order
     if (elements.sortOrder) {
         elements.sortOrder.addEventListener('change', (e) => {
-            const v = e.target.value === 'farthest' ? 'farthest' : 'closest';
+            const validValues = ['closest', 'farthest', 'newest', 'oldest'];
+            const v = validValues.includes(e.target.value) ? e.target.value : 'closest';
             appState.sortOrder = v;
             try { localStorage.setItem('sortOrder', v); } catch {}
             showNotification('Đã áp dụng', 'success');
