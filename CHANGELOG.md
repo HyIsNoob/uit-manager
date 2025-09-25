@@ -3,7 +3,7 @@
 ### Sửa lỗi / Cải tiến
 - Thời khóa biểu: chỉ highlight đúng môn đang diễn ra trong cột của ngày hôm nay (khắc phục trường hợp tô nhầm cột/ngày, ví dụ T5 → cs431 thay vì T3 → cs231).
 - Cập nhật ứng dụng: khi bấm “Khởi động lại để cập nhật”, ứng dụng sẽ đóng hoàn toàn (tắt cả chạy ngầm/Tray) rồi mới cài đặt, không cần tắt thủ công.
-- Tools → Khảo sát tự động: chuyển sang Puppeteer (không cần playwright install), chờ người dùng hoàn tất CAPTCHA trước khi tiếp tục, tự động dừng/đóng khi hoàn thành hoặc không có khảo sát.
+- Tools → Khảo sát tự động (đang test nhưng chưa có cơ hội test :D)
 
 ---
 
