@@ -1952,8 +1952,365 @@ ipcMain.handle('check-for-updates', async () => {
 
 ipcMain.handle('quit-and-install', () => {
   try {
-    autoUpdater.quitAndInstall();
+    // Ensure background/tray is closed and app is quitting fully
+    try {
+      if (appTray) {
+        appTray.destroy();
+      }
+    } catch {}
+    app.isQuiting = true;
+
+    // Close main window if exists
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.removeAllListeners('close');
+        mainWindow.close();
+      }
+    } catch {}
+
+    // Give a brief delay to allow windows/tray to close before installing
+    setTimeout(() => {
+      autoUpdater.quitAndInstall(false, true);
+    }, 300);
     return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// ===== SURVEY AUTOMATION LOGIC =====
+
+// No external dependencies needed for Puppeteer
+
+// Survey automation state
+let surveyState = {
+  isRunning: false,
+  isPaused: false
+};
+
+// Survey automation functions
+async function startSurveyAutomation(credentials) {
+  try {
+    if (surveyState.isRunning) {
+      return { success: false, error: 'Khảo sát đang chạy' };
+    }
+
+    // Use Puppeteer instead of Python/Selenium
+    surveyState.isRunning = true;
+    surveyState.isPaused = false;
+    
+    // Start survey automation in background
+    setTimeout(async () => {
+      try {
+        await runSurveyAutomation(credentials);
+      } catch (error) {
+        mainWindow.webContents.send('survey-log', `❌ Lỗi: ${error.message}`);
+        mainWindow.webContents.send('survey-status', 'Lỗi');
+        surveyState.isRunning = false;
+      }
+    }, 100);
+    
+    return { success: true };
+    
+  } catch (error) {
+    console.error('Survey start error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Main survey automation logic using Playwright
+async function runSurveyAutomation(credentials) {
+  const puppeteer = require('puppeteer');
+  
+  let browser = null;
+  
+  try {
+    mainWindow.webContents.send('survey-log', '🌐 Đang khởi tạo trình duyệt...');
+    
+    // Launch browser
+    browser = await puppeteer.launch({
+      headless: false, // Show browser for user interaction
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-extensions',
+        '--no-sandbox',
+        '--disable-setuid-sandbox'
+      ]
+    });
+    
+    const page = await browser.newPage();
+    
+    // Navigate to survey page
+    mainWindow.webContents.send('survey-log', '📋 Đang mở trang khảo sát...');
+    await page.goto('https://student.uit.edu.vn/sinhvien/phieukhaosat', { 
+      waitUntil: 'networkidle2',
+      timeout: 30000 
+    });
+    
+    // Fill login form
+    mainWindow.webContents.send('survey-log', '🔐 Đang điền thông tin đăng nhập...');
+    await page.waitForSelector('input[name="name"]', { timeout: 10000 });
+    
+    await page.type('input[name="name"]', credentials.email);
+    await page.type('input[name="pass"]', credentials.password);
+    
+    mainWindow.webContents.send('survey-log', '✅ Đã điền thông tin đăng nhập.');
+    mainWindow.webContents.send('survey-log', '⚠️ Vui lòng hoàn tất CAPTCHA và đăng nhập thủ công...');
+    mainWindow.webContents.send('survey-status', 'Chờ hoàn tất CAPTCHA');
+    
+    // Wait for user to complete CAPTCHA and login manually
+    // Wait for the survey page to load properly
+    try {
+      mainWindow.webContents.send('survey-log', '⏳ Đang chờ bạn hoàn tất CAPTCHA...');
+      
+      // Wait for the survey page content to appear
+      await page.waitForSelector('#block-system-main', { timeout: 300000 }); // 5 minutes timeout
+      
+      // Double check we're on the right page
+      const currentUrl = page.url();
+      if (!currentUrl.includes('phieukhaosat')) {
+        mainWindow.webContents.send('survey-log', '❌ Không thể truy cập trang khảo sát.');
+        throw new Error('Cannot access survey page');
+      }
+      
+      mainWindow.webContents.send('survey-log', '✅ Đăng nhập thành công!');
+    } catch (error) {
+      mainWindow.webContents.send('survey-log', '❌ Đăng nhập thất bại hoặc timeout.');
+      throw new Error('Login failed or timeout');
+    }
+    
+    mainWindow.webContents.send('survey-log', '🔍 Đang tìm kiếm khảo sát...');
+    mainWindow.webContents.send('survey-status', 'Đang tìm khảo sát');
+    
+    // Get survey list
+    const surveyLinks = await page.evaluate(() => {
+      const rows = document.querySelectorAll('#block-system-main table tbody tr');
+      const links = [];
+      
+      rows.forEach(row => {
+        try {
+          const linkElement = row.querySelector('td:nth-child(2) strong a');
+          const statusElement = row.querySelector('td:nth-child(3)');
+          
+          if (linkElement && statusElement) {
+            const link = linkElement.href;
+            const status = statusElement.textContent.trim();
+            
+            if (status === '(Chưa khảo sát)') {
+              links.push(link);
+            }
+          }
+        } catch (e) {
+          // Skip invalid rows
+        }
+      });
+      
+      return links;
+    });
+    
+    if (surveyLinks.length === 0) {
+      mainWindow.webContents.send('survey-log', '✅ Không có khảo sát nào cần thực hiện.');
+      mainWindow.webContents.send('survey-log', '🛑 Tự động dừng khảo sát...');
+      mainWindow.webContents.send('survey-status', 'Hoàn thành');
+      
+      // Auto-stop when no surveys
+      surveyState.isRunning = false;
+      surveyState.isPaused = false;
+      
+      // Close browser and exit
+      if (browser) {
+        await browser.close();
+      }
+      return;
+    }
+    
+    mainWindow.webContents.send('survey-log', `📊 Tìm thấy ${surveyLinks.length} khảo sát cần thực hiện.`);
+    
+    // Process each survey
+    for (let i = 0; i < surveyLinks.length; i++) {
+      if (!surveyState.isRunning) break;
+      
+      const currentSurvey = i + 1;
+      const totalSurveys = surveyLinks.length;
+      
+      mainWindow.webContents.send('survey-log', `🔄 Đang thực hiện khảo sát ${currentSurvey}/${totalSurveys}...`);
+      mainWindow.webContents.send('survey-status', `Khảo sát ${currentSurvey}/${totalSurveys}`);
+      
+      try {
+        await page.goto(surveyLinks[i], { waitUntil: 'networkidle2' });
+        
+        let pageCount = 0;
+        const maxPages = 10;
+        
+        while (pageCount < maxPages && surveyState.isRunning) {
+          // Handle pause
+          while (surveyState.isPaused && surveyState.isRunning) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+          
+          if (!surveyState.isRunning) break;
+          
+          pageCount++;
+          mainWindow.webContents.send('survey-log', `📄 Đang xử lý trang ${pageCount}...`);
+          
+          // Answer questions on current page
+          await answerQuestionsOnPage(page);
+          
+          // Try to go to next page
+          const nextButton = await page.locator('#movenextbtn');
+          if (await nextButton.isVisible()) {
+            await nextButton.click();
+            await page.waitForTimeout(1000);
+          } else {
+            // No next button, try to submit
+            break;
+          }
+        }
+        
+        // Submit survey
+        const submitButton = await page.$('#movesubmitbtn');
+        if (submitButton) {
+          await submitButton.click();
+          mainWindow.webContents.send('survey-log', `✅ Đã gửi khảo sát ${currentSurvey} thành công!`);
+          await page.waitForTimeout(2000);
+        }
+        
+        // Return to main page
+        await page.goto('https://student.uit.edu.vn/sinhvien/phieukhaosat', { waitUntil: 'networkidle2' });
+        
+      } catch (error) {
+        mainWindow.webContents.send('survey-log', `❌ Lỗi khi xử lý khảo sát ${currentSurvey}: ${error.message}`);
+      }
+    }
+    
+    if (surveyState.isRunning) {
+      mainWindow.webContents.send('survey-log', '🎉 Hoàn thành tất cả khảo sát!');
+      mainWindow.webContents.send('survey-log', '🛑 Tự động dừng khảo sát...');
+      mainWindow.webContents.send('survey-status', 'Hoàn thành');
+      
+      // Auto-stop after completion
+      surveyState.isRunning = false;
+      surveyState.isPaused = false;
+      
+      // Close browser and exit
+      if (browser) {
+        await browser.close();
+      }
+    }
+    
+  } catch (error) {
+    mainWindow.webContents.send('survey-log', `❌ Lỗi không mong muốn: ${error.message}`);
+    mainWindow.webContents.send('survey-status', 'Lỗi');
+  } finally {
+    // Only close browser if not already closed
+    if (browser && !browser.isConnected()) {
+      try {
+        await browser.close();
+      } catch (e) {
+        // Browser already closed
+      }
+    }
+    surveyState.isRunning = false;
+    surveyState.isPaused = false;
+  }
+}
+
+// Answer questions on current page
+async function answerQuestionsOnPage(page) {
+  try {
+    // Handle radio buttons
+    await page.evaluate(() => {
+      const radioGroups = {};
+      const radios = document.querySelectorAll('input[type="radio"]');
+      
+      // Group radios by name
+      radios.forEach(radio => {
+        const name = radio.name;
+        if (name && !radio.checked) {
+          if (!radioGroups[name]) {
+            radioGroups[name] = [];
+          }
+          radioGroups[name].push(radio);
+        }
+      });
+      
+      // Select last option for each group (most positive)
+      Object.values(radioGroups).forEach(group => {
+        if (group.length > 0) {
+          const lastRadio = group[group.length - 1];
+          lastRadio.click();
+        }
+      });
+    });
+    
+    // Handle select dropdowns
+    await page.evaluate(() => {
+      const selects = document.querySelectorAll('select');
+      selects.forEach(select => {
+        if (!select.disabled && select.options.length > 1) {
+          select.selectedIndex = select.options.length - 1;
+          select.dispatchEvent(new Event('change'));
+        }
+      });
+    });
+    
+    // Handle text inputs
+    await page.evaluate(() => {
+      const textInputs = document.querySelectorAll('input[type="text"], textarea');
+      textInputs.forEach(input => {
+        if (input.required && (!input.value || input.value.trim() === '')) {
+          input.value = 'Rất hài lòng với chất lượng giảng dạy';
+          input.dispatchEvent(new Event('input'));
+        }
+      });
+    });
+    
+  } catch (error) {
+    console.error('Error answering questions:', error);
+  }
+}
+
+
+// IPC handlers for survey automation
+ipcMain.handle('start-survey', async (event, credentials) => {
+  return await startSurveyAutomation(credentials);
+});
+
+ipcMain.handle('pause-survey', async () => {
+  try {
+    if (surveyState.isRunning) {
+      surveyState.isPaused = true;
+      mainWindow.webContents.send('survey-log', '⏸️ Đã tạm dừng khảo sát');
+      return { success: true };
+    }
+    return { success: false, error: 'No survey process running' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('resume-survey', async () => {
+  try {
+    if (surveyState.isRunning && surveyState.isPaused) {
+      surveyState.isPaused = false;
+      mainWindow.webContents.send('survey-log', '▶️ Đã tiếp tục khảo sát');
+      return { success: true };
+    }
+    return { success: false, error: 'No paused survey process' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('stop-survey', async () => {
+  try {
+    if (surveyState.isRunning) {
+      surveyState.isRunning = false;
+      surveyState.isPaused = false;
+      mainWindow.webContents.send('survey-log', '🛑 Đã dừng khảo sát');
+      return { success: true };
+    }
+    return { success: false, error: 'No survey process running' };
   } catch (error) {
     return { success: false, error: error.message };
   }

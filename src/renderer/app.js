@@ -2002,35 +2002,45 @@ function highlightCurrentTimetableState() {
         ];
         let currentPeriod = null;
         periodBounds.forEach((b,i)=>{ if (minutes >= b[0] && minutes < b[1]) currentPeriod = i+1; });
+
+        // Compute today's column in the grid (Mon=1..Sat=6, grid columns start at 2)
+        const jsDow = now.getDay(); // Sun=0..Sat=6
+        const dowMonBased = ((jsDow + 6) % 7) + 1; // Mon=1..Sun=7
+        const todayCol = (dowMonBased >= 1 && dowMonBased <= 6) ? (dowMonBased + 1) : null; // +1 for time column
+
         // Clear previous
         container.querySelectorAll('.tt-time').forEach(el=>el.classList.remove('current-period'));
         container.querySelectorAll('.tt-event').forEach(el=>el.classList.remove('current'));
+
         if (currentPeriod) {
             const row = currentPeriod + 1; // +1 header
             // Find time cell for that row
             const timeCell = Array.from(container.querySelectorAll('.tt-time')).find(c => c.style.gridRow == row);
             if (timeCell) timeCell.classList.add('current-period');
-            
-            // Find the specific event that is currently ongoing
-            const events = container.querySelectorAll('.tt-event');
-            let foundCurrentEvent = false;
-            
-            events.forEach(ev => {
-                const styleAttr = ev.getAttribute('style') || '';
-                // style contains: grid-column:X;grid-row:RS/RE;
-                const m = /grid-row:\s*(\d+)\s*\/\s*(\d+)/.exec(styleAttr);
-                if (m) {
-                    const rs = parseInt(m[1],10);
-                    const re = parseInt(m[2],10);
-                    const pIndex = currentPeriod + 1; // row index inside grid
-                    
-                    // Only highlight if this event is currently ongoing AND we haven't found one yet
-                    if (pIndex >= rs && pIndex < re && !foundCurrentEvent) {
-                        ev.classList.add('current');
-                        foundCurrentEvent = true;
+
+            if (todayCol) {
+                // Find the specific event that is currently ongoing in today's column only
+                const events = container.querySelectorAll('.tt-event');
+                let foundCurrentEvent = false;
+
+                events.forEach(ev => {
+                    if (foundCurrentEvent) return;
+                    const styleAttr = ev.getAttribute('style') || '';
+                    // style contains: grid-column:X;grid-row:RS/RE;
+                    const cm = /grid-column:\s*(\d+)/.exec(styleAttr);
+                    const rm = /grid-row:\s*(\d+)\s*\/\s*(\d+)/.exec(styleAttr);
+                    if (cm && rm) {
+                        const col = parseInt(cm[1], 10);
+                        const rs = parseInt(rm[1], 10);
+                        const re = parseInt(rm[2], 10);
+                        const pIndex = currentPeriod + 1; // row index inside grid
+                        if (col === todayCol && pIndex >= rs && pIndex < re) {
+                            ev.classList.add('current');
+                            foundCurrentEvent = true;
+                        }
                     }
-                }
-            });
+                });
+            }
         }
     } catch(e) { console.warn('Highlight timetable failed', e); }
 }
@@ -5804,3 +5814,201 @@ function ensureUrlWithToken(url) {
     return url;
   }
 }
+
+// ===== TOOLS SECTION LOGIC =====
+
+// Survey automation state
+let surveyState = {
+    isRunning: false,
+    isPaused: false,
+    currentProcess: null
+};
+
+// Survey tool elements
+const surveyElements = {
+    email: document.getElementById('survey-email'),
+    password: document.getElementById('survey-password'),
+    startBtn: document.getElementById('start-survey-btn'),
+    pauseBtn: document.getElementById('pause-survey-btn'),
+    stopBtn: document.getElementById('stop-survey-btn'),
+    statusText: document.getElementById('survey-status-text'),
+    logContent: document.getElementById('survey-log-content')
+};
+
+// Survey log management
+function addSurveyLog(message, type = 'info') {
+    if (!surveyElements.logContent) return;
+    
+    const timestamp = new Date().toLocaleTimeString('vi-VN');
+    const logEntry = document.createElement('p');
+    logEntry.className = `log-entry ${type}`;
+    logEntry.textContent = `[${timestamp}] ${message}`;
+    
+    surveyElements.logContent.appendChild(logEntry);
+    surveyElements.logContent.scrollTop = surveyElements.logContent.scrollHeight;
+}
+
+// Update survey status
+function updateSurveyStatus(status, type = 'info') {
+    if (!surveyElements.statusText) return;
+    
+    surveyElements.statusText.textContent = status;
+    
+    const statusIndicator = document.querySelector('.status-indicator');
+    if (statusIndicator) {
+        statusIndicator.style.borderLeftColor = type === 'success' ? 'var(--success)' : 
+                                               type === 'warning' ? 'var(--warning)' : 
+                                               type === 'error' ? 'var(--error)' : 'var(--info)';
+    }
+}
+
+// Start survey automation
+async function startSurvey() {
+    const email = surveyElements.email?.value.trim();
+    const password = surveyElements.password?.value.trim();
+    
+    if (!email || !password) {
+        showNotification('Vui lòng nhập đầy đủ MSSV và mật khẩu', 'error');
+        return;
+    }
+    
+    try {
+        surveyState.isRunning = true;
+        surveyState.isPaused = false;
+        
+        // Update UI
+        surveyElements.startBtn?.classList.add('hidden');
+        surveyElements.pauseBtn?.classList.remove('hidden');
+        surveyElements.stopBtn?.classList.remove('hidden');
+        
+        updateSurveyStatus('Đang khởi tạo...', 'info');
+        addSurveyLog('🚀 Bắt đầu khảo sát tự động...', 'info');
+        
+        // Call main process to start survey
+        const result = await window.electronAPI.startSurvey({
+            email: email,
+            password: password
+        });
+        
+        if (result.success) {
+            updateSurveyStatus('Đang thực hiện khảo sát...', 'info');
+            addSurveyLog('✅ Khởi tạo thành công, đang xử lý khảo sát...', 'success');
+        } else {
+            throw new Error(result.error || 'Không thể khởi tạo khảo sát');
+        }
+        
+    } catch (error) {
+        console.error('Survey start error:', error);
+        addSurveyLog(`❌ Lỗi: ${error.message}`, 'error');
+        updateSurveyStatus('Lỗi khởi tạo', 'error');
+        
+        // Reset UI
+        surveyState.isRunning = false;
+        surveyElements.startBtn?.classList.remove('hidden');
+        surveyElements.pauseBtn?.classList.add('hidden');
+        surveyElements.stopBtn?.classList.add('hidden');
+    }
+}
+
+// Pause/Resume survey
+function toggleSurveyPause() {
+    if (!surveyState.isRunning) return;
+    
+    surveyState.isPaused = !surveyState.isPaused;
+    
+    if (surveyState.isPaused) {
+        surveyElements.pauseBtn.innerHTML = '<i class="fas fa-play"></i> Tiếp tục';
+        updateSurveyStatus('Đã tạm dừng', 'warning');
+        addSurveyLog('⏸️ Đã tạm dừng khảo sát', 'warning');
+        
+        // Call main process to pause
+        window.electronAPI.pauseSurvey();
+    } else {
+        surveyElements.pauseBtn.innerHTML = '<i class="fas fa-pause"></i> Tạm dừng';
+        updateSurveyStatus('Đang tiếp tục...', 'info');
+        addSurveyLog('▶️ Tiếp tục khảo sát', 'info');
+        
+        // Call main process to resume
+        window.electronAPI.resumeSurvey();
+    }
+}
+
+// Stop survey
+async function stopSurvey() {
+    if (!surveyState.isRunning) return;
+    
+    try {
+        surveyState.isRunning = false;
+        surveyState.isPaused = false;
+        
+        updateSurveyStatus('Đang dừng...', 'warning');
+        addSurveyLog('🛑 Đang dừng khảo sát...', 'warning');
+        
+        // Call main process to stop
+        await window.electronAPI.stopSurvey();
+        
+        // Reset UI
+        surveyElements.startBtn?.classList.remove('hidden');
+        surveyElements.pauseBtn?.classList.add('hidden');
+        surveyElements.stopBtn?.classList.add('hidden');
+        
+        updateSurveyStatus('Đã dừng', 'info');
+        addSurveyLog('✅ Đã dừng khảo sát', 'info');
+        
+    } catch (error) {
+        console.error('Survey stop error:', error);
+        addSurveyLog(`❌ Lỗi khi dừng: ${error.message}`, 'error');
+    }
+}
+
+// Initialize survey tool
+function initSurveyTool() {
+    // Auto-fill current student ID
+    if (appState && appState.currentStudentId) {
+        surveyElements.email.value = appState.currentStudentId;
+    }
+    
+    // Load saved credentials
+    const savedEmail = localStorage.getItem('survey-email');
+    const savedPassword = localStorage.getItem('survey-password');
+    
+    if (savedEmail) surveyElements.email.value = savedEmail;
+    if (savedPassword) surveyElements.password.value = savedPassword;
+    
+    // Save credentials on change
+    surveyElements.email?.addEventListener('input', () => {
+        localStorage.setItem('survey-email', surveyElements.email.value);
+    });
+    
+    surveyElements.password?.addEventListener('input', () => {
+        localStorage.setItem('survey-password', surveyElements.password.value);
+    });
+    
+    // Button event listeners
+    surveyElements.startBtn?.addEventListener('click', startSurvey);
+    surveyElements.pauseBtn?.addEventListener('click', toggleSurveyPause);
+    surveyElements.stopBtn?.addEventListener('click', stopSurvey);
+    
+    // Enter key support
+    [surveyElements.email, surveyElements.password].forEach(input => {
+        input?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !surveyState.isRunning) {
+                startSurvey();
+            }
+        });
+    });
+}
+
+// Initialize tools when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    initSurveyTool();
+    
+    // Listen for survey events from main process
+    window.electronAPI.onSurveyLog((message) => {
+        addSurveyLog(message);
+    });
+    
+    window.electronAPI.onSurveyStatus((status) => {
+        updateSurveyStatus(status);
+    });
+});
