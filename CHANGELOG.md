@@ -1,3 +1,13 @@
+## [2.2.3] - 2025-09-24
+
+### Enhancement
+- Thêm 2 filter sắp xếp theo ngày giao: "Giao mới nhất" và "Giao cũ nhất"
+- Cho phép người dùng thay đổi trạng thái bài tập nhóm (tick/untick) thay vì cố định
+- Sắp xếp bài tập đã qua hạn và đã nộp xuống dưới cùng danh sách
+- Undo việc click bài tập mở chi tiết để tránh xung đột với checkbox
+
+---
+
 ## [2.2.2] - 2025-09-24
 
 ### Small Fix
