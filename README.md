@@ -14,20 +14,22 @@
 
 ---
 
-## ✨ Điểm nổi bật
+## ✨ Tính Năng
 
-- **Đăng nhập bằng MSSV**: Không phải nhập token nhiều lần
+- **Đăng nhập bằng MSSV**: Bind token vào MSSV cho lần đầu tiên, tài khoản được lưu trữ để đăng nhập nhanh hon!
+> lưu ý: tick Bỏ qua kiểm tra chứng chỉ TLS nếu không đăng nhập được
 - **Lưu trữ an toàn**: Token được mã hóa và lưu cục bộ bằng Electron Store
 - **Quản lý nhiều tài khoản**: Dễ dàng chuyển đổi người dùng
-- **Dashboard trực quan**: Thống kê, cảnh báo bài tập sắp hạn, làm mới dữ liệu
-- **Lọc thông minh**: Theo học kỳ, môn học, trạng thái nộp
-- **Trạng thái chi tiết**: Đã nộp, chưa nộp, nộp muộn, hạn chót, thời điểm nộp
+- **Dashboard**: Thống kê, cảnh báo bài tập sắp hạn, lịch có thể tương tác.
+- **Quản Lý Bài Tập**: Hệ thống lọc đa dạng, loading và lưu trữ cục bộ trong session để giảm thời gian load.
+- **Chi tiết Bài Tập**: Đã nộp, chưa nộp, nộp muộn, hạn chót, thời điểm nộp, ghi chú
+- **Quản Lý Môn Học**: Danh sách môn học theo học kỳ
+- **Chi tiết Môn Học**: Danh sách bài tập, thông báo, file, liên kết, ghi chú
+- **Thời Khóa Biểu**: Import từ file .ics, hiển thị dynamic theo giờ và thứ realtime.
+- **Hệ Thống Ghi Chú**: Tự tạo và quản lý file word theo từng môn, từng bài tập, thêm xóa sửa.
+- **Settings**: Nhiều option settings tùy nhu cầu (mở cùng windows, chạy ngầm, thông báo, dark/light mode)
 
-## 🖥️ Giao diện & Trải nghiệm
-
-- Dark theme theo màu trường UIT (UIT Blue `#1e3a8a`, Accent Cyan `#06b6d4`)
-- Hiệu ứng mượt mà: loading, transition, hover
-- Responsive cho nhiều độ phân giải màn hình
+> Demo hình ảnh các tính năng ở dưới
 
 ## 📦 Tải xuống
 
@@ -115,18 +117,28 @@ Các endpoint Moodle sử dụng:
 - Lỗi cài đặt trên Windows?
   - Tải đúng phiên bản `.exe` phù hợp và đóng các phiên bản đang chạy trước khi cài
 
-## 🤝 Đóng góp
+## Demo Chi Tiết Tính Năng
 
-Mọi đóng góp đều được chào đón!
-
-1. Fork repo
-2. Tạo nhánh tính năng: `feat/ten-tinh-nang`
-3. Commit theo chuẩn ngắn gọn, rõ ràng
-4. Tạo Pull Request mô tả thay đổi
-
-## 📄 Giấy phép
-
-Phát hành dưới giấy phép MIT.
+- **Đăng nhập bằng MSSV**: Bind token vào MSSV cho lần đầu tiên, tài khoản được lưu trữ để đăng nhập nhanh hon!
+<img width="1919" height="935" alt="image" src="https://github.com/user-attachments/assets/9aefbfaf-8d82-4952-bc7a-f16f49292f9e" />
+*lưu ý: tick Bỏ qua kiểm tra chứng chỉ TLS nếu không đăng nhập được*
+- **Lưu trữ an toàn**: Token được mã hóa và lưu cục bộ bằng Electron Store
+- **Quản lý nhiều tài khoản**: Dễ dàng chuyển đổi người dùng
+<img width="1918" height="936" alt="image" src="https://github.com/user-attachments/assets/f332640b-f716-42e3-8121-55ec4156c245" />
+- **Dashboard**: Thống kê, cảnh báo bài tập sắp hạn, lịch có thể tương tác.
+<img width="1919" height="948" alt="image" src="https://github.com/user-attachments/assets/0b1d8829-f5a7-45f2-b869-58a6de0548c8" />
+- **Quản Lý Bài Tập**: Hệ thống lọc đa dạng, loading và lưu trữ cục bộ trong session để giảm thời gian load.
+<img width="1910" height="942" alt="image" src="https://github.com/user-attachments/assets/5376aa77-f5fe-4c1e-aabe-a702db9176ff" />
+- **Chi tiết Bài Tập**: Đã nộp, chưa nộp, nộp muộn, hạn chót, thời điểm nộp, ghi chú
+<img width="1918" height="946" alt="image" src="https://github.com/user-attachments/assets/11378963-82dc-4c01-9f1b-ce09fe032173" />
+- **Quản Lý Môn Học**: Danh sách môn học theo học kỳ
+<img width="1908" height="946" alt="image" src="https://github.com/user-attachments/assets/67f8742c-aa40-44ef-9a97-b8769e881cef" />
+- **Chi tiết Môn Học**: Danh sách bài tập, thông báo, file, liên kết, ghi chú
+<img width="1915" height="943" alt="image" src="https://github.com/user-attachments/assets/820ab59e-2d78-42f8-9ce9-e31da8244c9e" />
+- **Thời Khóa Biểu**: Import từ file .ics, hiển thị dynamic theo giờ và thứ realtime.
+<img width="1919" height="939" alt="image" src="https://github.com/user-attachments/assets/d6a3d293-19fb-4f35-913d-d80b5a193e9b" />
+- **Hệ Thống Ghi Chú**: Tự tạo và quản lý file word theo từng môn, từng bài tập, thêm xóa sửa.
+<img width="1919" height="1005" alt="image" src="https://github.com/user-attachments/assets/9c36f51a-7239-481b-bfc8-3bb3b694e882" />
 
 ## 🔗 Liên kết
 
@@ -134,5 +146,3 @@ Phát hành dưới giấy phép MIT.
 - Moodle UIT: `https://courses.uit.edu.vn`
 
 ---
-
-UIT Assignment Manager — trợ thủ đắc lực quản lý bài tập cho sinh viên UIT 🎓✨
