@@ -1988,8 +1988,11 @@ function highlightCurrentTimetableState() {
             // Find time cell for that row
             const timeCell = Array.from(container.querySelectorAll('.tt-time')).find(c => c.style.gridRow == row);
             if (timeCell) timeCell.classList.add('current-period');
-            // Determine ongoing event
+            
+            // Find the specific event that is currently ongoing
             const events = container.querySelectorAll('.tt-event');
+            let foundCurrentEvent = false;
+            
             events.forEach(ev => {
                 const styleAttr = ev.getAttribute('style') || '';
                 // style contains: grid-column:X;grid-row:RS/RE;
@@ -1998,7 +2001,12 @@ function highlightCurrentTimetableState() {
                     const rs = parseInt(m[1],10);
                     const re = parseInt(m[2],10);
                     const pIndex = currentPeriod + 1; // row index inside grid
-                    if (pIndex >= rs && pIndex < re) ev.classList.add('current');
+                    
+                    // Only highlight if this event is currently ongoing AND we haven't found one yet
+                    if (pIndex >= rs && pIndex < re && !foundCurrentEvent) {
+                        ev.classList.add('current');
+                        foundCurrentEvent = true;
+                    }
                 }
             });
         }

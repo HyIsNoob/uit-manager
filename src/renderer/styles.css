@@ -4471,6 +4471,14 @@ body {
   .tt-event-periods, .tt-event-room { font-size:10px; }
 }
 
+/* Ensure last period is not cut off */
+.tt-grid {
+    padding-bottom: 20px;
+    overflow: visible;
+}
+
+/* Prevent overlapping on hover - removed z-index to avoid overlapping */
+
 /* Responsive timetable */
 @media (max-width: 768px) {
     .timetable-table {

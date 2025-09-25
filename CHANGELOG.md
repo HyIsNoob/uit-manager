@@ -1,3 +1,12 @@
+## [2.2.2] - 2025-09-24
+
+### Small Fix
+- Sửa lỗi highlight thời khóa biểu: chỉ highlight môn học cụ thể đang diễn ra, không phải cả hàng tiết
+- Sửa lỗi overlapping khi hover các môn học trong light mode
+- Cải thiện hiển thị tiết cuối không bị che
+
+---
+
 ## [2.2.1] - 2025-09-24
 
 ### Hotfix
