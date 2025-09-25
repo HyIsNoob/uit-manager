@@ -4831,3 +4831,59 @@ body {
 [data-theme="dark"] .status-indicator {
     background: var(--bg-tertiary);
 }
+
+/* --- DKHP Tool --- */
+#dkhp-tool .dkhp-body { display:flex; flex-direction:column; gap:12px; }
+#dkhp-tool .field-label { font-weight:600; font-size:13px; opacity:.9; }
+#dkhp-tool .dkhp-input, #dkhp-tool .dkhp-output { width:100%; padding:10px; border-radius:8px; border:1px solid var(--bg-tertiary); background:var(--bg-secondary); color:var(--fg-primary); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+#dkhp-tool .dkhp-actions { display:flex; gap:10px; }
+#dkhp-tool details.dkhp-notes { margin-top:8px; }
+#dkhp-tool details.dkhp-notes summary { cursor:pointer; }
+/* --- END DKHP Tool --- */
+
+/* --- Tools Tabs --- */
+.tools-tabs{ display:flex; gap:8px; margin:12px 0 16px; border-bottom:1px solid var(--bg-tertiary); }
+.tools-tab{ padding:8px 14px; border:none; background:transparent; color:var(--fg-secondary); cursor:pointer; border-radius:8px 8px 0 0; font-weight:600; }
+.tools-tab.active{ background:var(--bg-secondary); color:var(--fg-primary); box-shadow:0 -1px 0 0 var(--bg-tertiary) inset, 0 1px 0 0 var(--bg-secondary); }
+.tools-panel{ padding:8px 0; }
+/* Tool card tweaks */
+.tool-card{ border:1px solid var(--bg-tertiary); border-radius:12px; padding:14px; background:var(--bg-secondary); }
+.tool-header{ display:flex; gap:12px; align-items:center; margin-bottom:10px; }
+.tool-icon{ width:36px; height:36px; display:flex; align-items:center; justify-content:center; background:var(--bg-tertiary); border-radius:8px; }
+.tool-info h3{ margin:0; font-size:16px; }
+.tool-info p{ margin:2px 0 0; opacity:.85; }
+/* --- END Tools Tabs --- */
+
+/* --- Enhanced Tools Tabs --- */
+.tools-tabs{ display:flex; gap:10px; margin:12px 0 18px; border-bottom:1px solid var(--bg-tertiary); padding-bottom:8px; }
+.tools-tab{ display:flex; align-items:center; gap:8px; padding:10px 16px; border:none; background:rgba(6,182,212,0.08); color:var(--fg-secondary); cursor:pointer; border-radius:12px; font-weight:700; letter-spacing:.2px; transition: all .25s ease; }
+.tools-tab i{ color:#06b6d4; }
+.tools-tab:hover{ transform: translateY(-1px); background:rgba(6,182,212,0.14); color:var(--fg-primary); box-shadow:0 6px 18px -10px rgba(0,0,0,.35); }
+.tools-tab:focus{ outline:2px solid rgba(6,182,212,0.45); outline-offset:2px; }
+.tools-tab.active{ background:linear-gradient(135deg, rgba(6,182,212,0.22), rgba(59,130,246,0.18)); color:var(--fg-primary); box-shadow:0 10px 24px -14px rgba(6,182,212,.65); }
+.tools-tab.active i{ color:#0ea5e9; }
+.tools-panel{ padding:10px 0; }
+.tools-panel.fade-in{ animation: toolsPanelFade .35s ease both; }
+@keyframes toolsPanelFade { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform: translateY(0); } }
+/* Tool card polish */
+.tool-card{ border:1px solid var(--bg-tertiary); border-radius:14px; padding:16px; background:var(--bg-secondary); box-shadow: 0 8px 24px -18px rgba(0,0,0,.35); }
+.tool-header{ display:flex; gap:12px; align-items:center; margin-bottom:12px; }
+.tool-icon{ width:40px; height:40px; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg, rgba(6,182,212,.18), rgba(59,130,246,.12)); border-radius:10px; }
+.tool-info h3{ margin:0; font-size:17px; }
+.tool-info p{ margin:2px 0 0; opacity:.9; }
+/* --- END Enhanced Tools Tabs --- */
+
+/* --- DKHP Enhanced Buttons --- */
+#dkhp-tool .dkhp-actions-top{ display:flex; gap:10px; margin:4px 0 8px; flex-wrap:wrap; }
+.btn{ position:relative; overflow:hidden; }
+.btn.primary, .btn.accent{ background:linear-gradient(135deg, #06b6d4, #3b82f6); color:white; border:none; }
+.btn.accent:hover{ box-shadow:0 12px 28px -14px rgba(6,182,212,.7); transform: translateY(-1px); }
+.btn.ghost{ background:transparent; border:1px solid var(--bg-tertiary); color:var(--fg-secondary); }
+.btn.ghost:hover{ background:var(--bg-tertiary); color:var(--fg-primary); }
+/* Ripple */
+.btn::after{ content:""; position:absolute; inset:auto; width:0; height:0; background:rgba(255,255,255,.35); border-radius:50%; transform: translate(-50%, -50%); pointer-events:none; opacity:0; }
+.btn:active::after{ width:140px; height:140px; top:var(--ry,50%); left:var(--rx,50%); opacity:1; transition: width .35s ease, height .35s ease, opacity .6s ease; }
+/* Copy/generate playful pulse */
+#dkhp-generate-btn, #dkhp-copy-btn{ transition: transform .15s ease; }
+#dkhp-generate-btn:hover, #dkhp-copy-btn:hover{ transform: translateY(-1px) scale(1.01); }
+#dkhp-generate-btn:active, #dkhp-copy-btn:active{ transform: translateY(0) scale(.995); }

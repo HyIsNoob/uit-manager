@@ -6012,3 +6012,154 @@ document.addEventListener('DOMContentLoaded', () => {
         updateSurveyStatus(status);
     });
 });
+
+// ===== DKHP SCRIPT GENERATOR =====
+(function initDkhpTool(){
+    const input = document.getElementById('dkhp-input');
+    const output = document.getElementById('dkhp-output');
+    const genBtn = document.getElementById('dkhp-generate-btn');
+    const copyBtn = document.getElementById('dkhp-copy-btn');
+    if (!input || !output || !genBtn || !copyBtn) return;
+
+    function buildScript(rawList){
+        const list = (rawList || '').split(',').map(s => s.trim()).filter(Boolean);
+        const csv = list.join(',');
+        return `var monDangKy = "\n${csv}\n";
+
+var successLog = (message) => console.log('%c' + message, 'font-weight:bold; color:green;');
+var infoLog = (message) => console.log('%c' + message, 'font-weight:bold; color:#0ea5e9;');
+var warnLog = (message) => console.log('%c' + message, 'font-weight:bold; color:#f59e0b;');
+var errorLog = (message) => console.log('%c' + message, 'font-weight:bold; color:red;');
+
+(function(){
+  try {
+    var classCodes = monDangKy.split(',').map(it=>it.trim()).filter(Boolean);
+
+    function waitForElement(selector){
+      return new Promise((resolve) => {
+        if (document.querySelector(selector)) return resolve(document.querySelector(selector));
+        const observer = new MutationObserver(() => {
+          if (document.querySelector(selector)) {
+            resolve(document.querySelector(selector));
+            observer.disconnect();
+          }
+        });
+        observer.observe(document.body, { childList:true, subtree:true });
+      });
+    }
+
+    function findAndCheck(rows){
+      function pickCode(code){
+        for (let row of rows){
+          var checkbox = row.querySelector('input[type="checkbox"]');
+          var codeCell = row.querySelector('td:nth-child(2)');
+          if (!checkbox || !codeCell) continue;
+          var text = (codeCell.textContent||'').trim();
+          if (text === code){
+            if (!checkbox.checked){ checkbox.click(); }
+            successLog('Đã chọn: ' + text);
+            return true;
+          }
+        }
+        warnLog('Không tìm thấy: ' + code);
+        return false;
+      }
+      classCodes.forEach(c => pickCode(c));
+    }
+
+    waitForElement('tbody > tr').then(() => {
+      var table = document.querySelector('tbody');
+      if (!table){ errorLog('Không tìm thấy bảng lớp'); return; }
+      var rows = table.querySelectorAll('tr');
+      if (!rows || !rows.length){ errorLog('Không tìm thấy hàng dữ liệu'); return; }
+      infoLog('Đang tìm và chọn các lớp...');
+      findAndCheck(rows);
+
+      var submitSelectors = [
+        ".detailBar button.chakra-button",
+        "input[type='submit'][value*='Đăng']",
+        "button[type='submit']",
+        ".btn-submit",
+        "#submit-btn"
+      ];
+
+      function clickSubmit(){
+        for (let sel of submitSelectors){
+          var btn = document.querySelector(sel);
+          if (btn){ btn.click(); successLog('Đã gửi đăng ký'); return true; }
+        }
+        warnLog('Không tìm thấy nút đăng ký, tự nhấn tay giúp nhé.');
+        return false;
+      }
+
+      // chờ một nhịp để UI cập nhật trước khi nộp
+      setTimeout(clickSubmit, 300);
+      return 'Done';
+    });
+  } catch (e){
+    errorLog('Lỗi script: ' + (e && e.message));
+  }
+})();`;
+    }
+
+    genBtn.addEventListener('click', () => {
+        const script = buildScript(input.value);
+        output.value = script;
+    });
+
+    copyBtn.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(output.value || '');
+            showNotification('Đã copy script vào clipboard', 'success');
+        } catch {
+            showNotification('Copy thất bại', 'error');
+        }
+    });
+})();
+// ===== END DKHP SCRIPT GENERATOR =====
+
+(function initToolsTabs(){
+    const tabs = document.querySelectorAll('.tools-tab');
+    const panels = document.querySelectorAll('.tools-panel');
+    if (!tabs.length || !panels.length) return;
+
+    function activate(tool){
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.tool === tool));
+        panels.forEach(p => {
+            const show = p.dataset.toolPanel === tool;
+            p.classList.toggle('hidden', !show);
+            if (show) {
+                p.classList.remove('fade-in'); // restart animation
+                void p.offsetWidth; // reflow hack
+                p.classList.add('fade-in');
+            }
+        });
+    }
+
+    tabs.forEach(t => t.addEventListener('click', () => activate(t.dataset.tool)));
+
+    // default active is survey
+    activate('survey');
+})();
+
+(function initDkhpExternal(){
+    const btn = document.getElementById('dkhp-open-web');
+    if (!btn || !window.electronAPI?.openExternal) return;
+    btn.addEventListener('click', async () => {
+        try {
+            await window.electronAPI.openExternal('https://dkhp-uit.vercel.app/1');
+        } catch {
+            showNotification('Không thể mở trình duyệt', 'error');
+        }
+    });
+})();
+
+(function initButtonRipples(){
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('.btn');
+        if (!btn) return;
+        const rect = btn.getBoundingClientRect();
+        btn.style.setProperty('--rx', `${e.clientX - rect.left}px`);
+        btn.style.setProperty('--ry', `${e.clientY - rect.top}px`);
+    });
+})();

@@ -1,3 +1,11 @@
+## [2.3.1] - 2025-09-25
+
+### UI/UX
+- Tools: chuyển sang giao diện tabs với hiệu ứng chuyển mượt, nổi bật tab active.
+- DKHP Tool: bổ sung nút mở dkhp-uit.vercel.app bằng trình duyệt mặc định; nút Generate/Copy có animation ripple/pulse; card bố cục gọn và dễ thao tác.
+
+---
+
 ## [2.3.0] - 2025-09-25
 
 ### Sửa lỗi / Cải tiến

@@ -411,74 +411,114 @@
 
                 <!-- Tools Section -->
                 <section id="tools-section" class="content-section hidden">
-                    <div class="section-header">
-                        <h2>Tools</h2>
-                        <p class="section-subtitle">Các công cụ tiện ích cho sinh viên UIT</p>
+                    <h2 class="section-title">Tools</h2>
+
+                    <div class="tools-tabs">
+                        <button class="tools-tab active" data-tool="survey"><i class="fas fa-robot"></i><span>Khảo sát tự động</span></button>
+                        <button class="tools-tab" data-tool="dkhp"><i class="fas fa-clipboard-check"></i><span>Đăng ký học phần</span></button>
                     </div>
 
-                    <!-- Survey Tool -->
-                    <div class="tool-card">
-                        <div class="tool-header">
-                            <div class="tool-icon">
-                                <i class="fas fa-poll"></i>
-                            </div>
-                            <div class="tool-info">
-                                <h3>Khảo sát tự động</h3>
-                                <p>Tự động thực hiện khảo sát cuối kỳ của trường</p>
-                            </div>
-                        </div>
-                        
-                        <div class="tool-content">
-                            <div class="survey-form">
-                                <div class="form-group">
-                                    <label for="survey-email">Mã số sinh viên</label>
-                                    <input type="text" id="survey-email" placeholder="Nhập MSSV của bạn">
-                                </div>
-                                <div class="form-group">
-                                    <label for="survey-password">Mật khẩu</label>
-                                    <input type="password" id="survey-password" placeholder="Nhập mật khẩu">
+                    <div class="tools-panels">
+                        <div class="tools-panel" data-tool-panel="survey">
+                            <!-- Khảo sát tự động toolcard existing -->
+                            <div class="tool-card">
+                                <div class="tool-header">
+                                    <div class="tool-icon">
+                                        <i class="fas fa-poll"></i>
+                                    </div>
+                                    <div class="tool-info">
+                                        <h3>Khảo sát tự động</h3>
+                                        <p>Tự động thực hiện khảo sát cuối kỳ của trường</p>
+                                    </div>
                                 </div>
                                 
-                                <div class="survey-actions">
-                                    <button id="start-survey-btn" class="btn btn-primary">
-                                        <i class="fas fa-play"></i>
-                                        Bắt đầu khảo sát
-                                    </button>
-                                    <button id="pause-survey-btn" class="btn btn-warning hidden">
-                                        <i class="fas fa-pause"></i>
-                                        Tạm dừng
-                                    </button>
-                                    <button id="stop-survey-btn" class="btn btn-danger hidden">
-                                        <i class="fas fa-stop"></i>
-                                        Dừng
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <div class="survey-status">
-                                <div class="status-indicator">
-                                    <span id="survey-status-text">Sẵn sàng</span>
-                                </div>
-                            </div>
-                            
-                            <div class="survey-log">
-                                <h4>Nhật ký hoạt động</h4>
-                                <div id="survey-log-content" class="log-content">
-                                    <p class="log-entry">Chờ bắt đầu khảo sát...</p>
+                                <div class="tool-content">
+                                    <div class="survey-form">
+                                        <div class="form-group">
+                                            <label for="survey-email">Mã số sinh viên</label>
+                                            <input type="text" id="survey-email" placeholder="Nhập MSSV của bạn">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="survey-password">Mật khẩu</label>
+                                            <input type="password" id="survey-password" placeholder="Nhập mật khẩu">
+                                        </div>
+                                        
+                                        <div class="survey-actions">
+                                            <button id="start-survey-btn" class="btn btn-primary">
+                                                <i class="fas fa-play"></i>
+                                                Bắt đầu khảo sát
+                                            </button>
+                                            <button id="pause-survey-btn" class="btn btn-warning hidden">
+                                                <i class="fas fa-pause"></i>
+                                                Tạm dừng
+                                            </button>
+                                            <button id="stop-survey-btn" class="btn btn-danger hidden">
+                                                <i class="fas fa-stop"></i>
+                                                Dừng
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="survey-status">
+                                        <div class="status-indicator">
+                                            <span id="survey-status-text">Sẵn sàng</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="survey-log">
+                                        <h4>Nhật ký hoạt động</h4>
+                                        <div id="survey-log-content" class="log-content">
+                                            <p class="log-entry">Chờ bắt đầu khảo sát...</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Future Tools Placeholder -->
-                    <div class="tool-card coming-soon">
-                        <div class="tool-header">
-                            <div class="tool-icon">
-                                <i class="fas fa-plus"></i>
-                            </div>
-                            <div class="tool-info">
-                                <h3>Tools khác</h3>
-                                <p>Đang phát triển thêm các công cụ tiện ích khác...</p>
+                        <div class="tools-panel hidden" data-tool-panel="dkhp">
+                            <!-- Tool: Đăng ký học phần -->
+                            <div class="tool-card" id="dkhp-tool">
+                                <div class="tool-header">
+                                    <div class="tool-icon"><i class="fas fa-clipboard-check"></i></div>
+                                    <div class="tool-info">
+                                        <h3>Đăng ký học phần (DKHP)</h3>
+                                        <p>Giới thiệu trang hỗ trợ ĐKHP và sinh script tự động chọn lớp theo danh sách mã lớp.</p>
+                                    </div>
+                                </div>
+
+                                <div class="dkhp-body">
+                                    <div class="dkhp-about">
+                                        <p>
+                                            Trang hỗ trợ ĐKHP và tạo danh sách lớp: 
+                                            <div class="dkhp-actions-top">
+                                                <button id="dkhp-open-web" class="btn accent"><i class="fas fa-external-link-alt"></i> Mở dkhp-uit.vercel.app</button>
+                                                <a class="btn ghost" href="https://github.com/loia5tqd001/Dang-Ky-Hoc-Phan-UIT" target="_blank" rel="noreferrer"><i class="fab fa-github"></i> Repo tác giả</a>
+                                            </div>
+                                        </p>
+                                        <p>Sau khi soạn TKB, dán danh sách lớp (ví dụ: <code>CS406.Q12.1,SE357.Q11.1,CS406.Q12,SE357.Q11</code>) vào ô dưới để sinh script.</p>
+                                    </div>
+
+                                    <label for="dkhp-input" class="field-label">Danh sách mã lớp (phân tách bằng dấu phẩy):</label>
+                                    <textarea id="dkhp-input" class="dkhp-input" rows="3" placeholder="CS406.Q12.1,SE357.Q11.1,CS406.Q12,SE357.Q11"></textarea>
+
+                                    <div class="dkhp-actions">
+                                        <button id="dkhp-generate-btn" class="btn primary"><i class="fas fa-code"></i> Tạo script</button>
+                                        <button id="dkhp-copy-btn" class="btn"><i class="fas fa-copy"></i> Copy script</button>
+                                    </div>
+
+                                    <label for="dkhp-output" class="field-label">Script sinh ra (dán vào Console trang ĐKHP của trường):</label>
+                                    <textarea id="dkhp-output" class="dkhp-output" rows="10" readonly></textarea>
+
+                                    <details class="dkhp-notes">
+                                        <summary>Script này cải tiến gì so với bản cơ bản?</summary>
+                                        <ul>
+                                            <li>Chờ DOM động với <code>MutationObserver</code> (đỡ lỗi chưa load xong).</li>
+                                            <li>Chọn lớp theo mã chính xác ở cột thứ 2, click checkbox an toàn.</li>
+                                            <li>Hỗ trợ nhiều selector nút nộp/đăng ký để tương thích UI khác nhau.</li>
+                                            <li>Log rõ ràng màu sắc trên Console, dễ theo dõi.</li>
+                                        </ul>
+                                    </details>
+                                </div>
                             </div>
                         </div>
                     </div>
