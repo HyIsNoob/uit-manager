@@ -168,6 +168,13 @@
                             <span class="nav-text">Thời khóa biểu</span>
                         </div>
                         
+                        <div class="nav-item" data-section="tools">
+                            <div class="nav-icon">
+                                <i class="fas fa-tools"></i>
+                            </div>
+                            <span class="nav-text">Tools</span>
+                        </div>
+                        
                         <div class="nav-item" data-section="settings">
                             <div class="nav-icon">
                                 <i class="fas fa-cog"></i>
@@ -399,6 +406,81 @@
                             <i class="fas fa-file-import"></i>
                             Import .ics
                         </button>
+                    </div>
+                </section>
+
+                <!-- Tools Section -->
+                <section id="tools-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Tools</h2>
+                        <p class="section-subtitle">Các công cụ tiện ích cho sinh viên UIT</p>
+                    </div>
+
+                    <!-- Survey Tool -->
+                    <div class="tool-card">
+                        <div class="tool-header">
+                            <div class="tool-icon">
+                                <i class="fas fa-poll"></i>
+                            </div>
+                            <div class="tool-info">
+                                <h3>Khảo sát tự động</h3>
+                                <p>Tự động thực hiện khảo sát cuối kỳ của trường</p>
+                            </div>
+                        </div>
+                        
+                        <div class="tool-content">
+                            <div class="survey-form">
+                                <div class="form-group">
+                                    <label for="survey-email">Mã số sinh viên</label>
+                                    <input type="text" id="survey-email" placeholder="Nhập MSSV của bạn">
+                                </div>
+                                <div class="form-group">
+                                    <label for="survey-password">Mật khẩu</label>
+                                    <input type="password" id="survey-password" placeholder="Nhập mật khẩu">
+                                </div>
+                                
+                                <div class="survey-actions">
+                                    <button id="start-survey-btn" class="btn btn-primary">
+                                        <i class="fas fa-play"></i>
+                                        Bắt đầu khảo sát
+                                    </button>
+                                    <button id="pause-survey-btn" class="btn btn-warning hidden">
+                                        <i class="fas fa-pause"></i>
+                                        Tạm dừng
+                                    </button>
+                                    <button id="stop-survey-btn" class="btn btn-danger hidden">
+                                        <i class="fas fa-stop"></i>
+                                        Dừng
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="survey-status">
+                                <div class="status-indicator">
+                                    <span id="survey-status-text">Sẵn sàng</span>
+                                </div>
+                            </div>
+                            
+                            <div class="survey-log">
+                                <h4>Nhật ký hoạt động</h4>
+                                <div id="survey-log-content" class="log-content">
+                                    <p class="log-entry">Chờ bắt đầu khảo sát...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Future Tools Placeholder -->
+                    <div class="tool-card coming-soon">
+                        <div class="tool-header">
+                            <div class="tool-icon">
+                                <i class="fas fa-plus"></i>
+                            </div>
+                            <div class="tool-info">
+                                <h3>Tools khác</h3>
+                                <p>Đang phát triển thêm các công cụ tiện ích khác...</p>
+                            </div>
+                        </div>
                     </div>
                 </section>
 

@@ -73,6 +73,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ensureAssignmentNoteDoc: (assignmentId, name) => ipcRenderer.invoke('ensure-assignment-note-doc', assignmentId, name),
   deleteAssignmentNoteDoc: (assignmentId) => ipcRenderer.invoke('delete-assignment-note-doc', assignmentId),
 
+  // Survey Tools
+  startSurvey: (credentials) => ipcRenderer.invoke('start-survey', credentials),
+  pauseSurvey: () => ipcRenderer.invoke('pause-survey'),
+  resumeSurvey: () => ipcRenderer.invoke('resume-survey'),
+  stopSurvey: () => ipcRenderer.invoke('stop-survey'),
+  onSurveyLog: (callback) => ipcRenderer.on('survey-log', (e, message) => callback(message)),
+  onSurveyStatus: (callback) => ipcRenderer.on('survey-status', (e, status) => callback(status)),
+
   // Events
   onHasSavedAccounts: (callback) => ipcRenderer.on('has-saved-accounts', callback),
   onUpdateAvailable: (callback) => ipcRenderer.on('update-available', (e, info) => callback(info)),

@@ -4607,3 +4607,227 @@ body {
     gap: 12px;
 }
 .assignment-loading-box i { color: var(--uit-blue); font-size: 20px; }
+
+/* ===== TOOLS SECTION STYLES ===== */
+
+/* Section Subtitle */
+.section-subtitle {
+    color: var(--text-muted);
+    font-size: 14px;
+    margin-top: 4px;
+    font-weight: 400;
+}
+
+/* Tool Cards */
+.tool-card {
+    background: var(--bg-secondary);
+    border: var(--glass-border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 20px;
+    box-shadow: var(--glass-shadow);
+    transition: all 0.3s ease;
+}
+
+.tool-card:hover {
+    box-shadow: var(--glass-shadow-hover);
+    transform: translateY(-2px);
+}
+
+.tool-card.coming-soon {
+    opacity: 0.6;
+    background: var(--bg-tertiary);
+}
+
+.tool-card.coming-soon:hover {
+    transform: none;
+    box-shadow: var(--glass-shadow);
+}
+
+/* Tool Header */
+.tool-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.tool-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--uit-blue), var(--uit-blue-light));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.tool-info h3 {
+    color: var(--text-primary);
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 4px 0;
+}
+
+.tool-info p {
+    color: var(--text-muted);
+    font-size: 14px;
+    margin: 0;
+    line-height: 1.4;
+}
+
+/* Tool Content */
+.tool-content {
+    margin-top: 20px;
+}
+
+/* Survey Form */
+.survey-form {
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.survey-form .form-group {
+    margin-bottom: 16px;
+}
+
+.survey-form .form-group:last-child {
+    margin-bottom: 0;
+}
+
+.survey-form label {
+    display: block;
+    color: var(--text-primary);
+    font-weight: 500;
+    font-size: 14px;
+    margin-bottom: 6px;
+}
+
+.survey-form input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.survey-form input:focus {
+    outline: none;
+    border-color: var(--uit-blue);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* Survey Actions */
+.survey-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+}
+
+.survey-actions .btn {
+    min-width: 140px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-weight: 500;
+    font-size: 14px;
+}
+
+/* Survey Status */
+.survey-status {
+    margin-bottom: 20px;
+}
+
+.status-indicator {
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    padding: 12px 16px;
+    border-left: 4px solid var(--success);
+}
+
+.status-indicator span {
+    color: var(--text-primary);
+    font-weight: 500;
+    font-size: 14px;
+}
+
+/* Survey Log */
+.survey-log h4 {
+    color: var(--text-primary);
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+.log-content {
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    padding: 16px;
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+}
+
+.log-entry {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 0 0 8px 0;
+    font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.log-entry:last-child {
+    margin-bottom: 0;
+}
+
+.log-entry.success {
+    color: var(--success);
+}
+
+.log-entry.warning {
+    color: var(--warning);
+}
+
+.log-entry.error {
+    color: var(--error);
+}
+
+.log-entry.info {
+    color: var(--info);
+}
+
+/* Dark mode adjustments for Tools */
+[data-theme="dark"] .tool-card {
+    background: var(--bg-secondary);
+    border: var(--glass-border);
+}
+
+[data-theme="dark"] .survey-form {
+    background: var(--bg-tertiary);
+}
+
+[data-theme="dark"] .survey-form input {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .log-content {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+}
+
+[data-theme="dark"] .status-indicator {
+    background: var(--bg-tertiary);
+}
