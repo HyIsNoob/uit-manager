@@ -1,3 +1,25 @@
+## [2.4.1] - 2025-01-03
+
+### 🐛 Bug Fixes
+- **Delete Modal Visibility**: Sửa lỗi modal xóa deadline không hiển thị nội dung
+- **Modal Animation**: Thêm class `showing` để trigger entrance animation
+- **Event Handling**: Cải thiện event listeners để tránh conflict
+- **Modal State**: Proper cleanup với `no-scroll` class management
+
+### 🎨 UI/UX Improvements
+- **Modal Layout**: Điều chỉnh kích thước modal xóa (rộng hơn, ngắn hơn)
+- **Responsive Design**: Modal responsive với `90vw` width
+- **Animation**: Smooth entrance và exit animations
+- **Consistent Behavior**: Modal hoạt động giống modal deadline chính
+
+### 🔧 Technical Improvements
+- **Event Delegation**: Sử dụng event delegation thay vì inline onclick
+- **State Management**: Sử dụng dataset để lưu deadline ID
+- **Error Handling**: Proper try-catch cho delete operations
+- **Code Cleanup**: Loại bỏ test data và debug logs
+
+---
+
 ## [2.4.0] - 2025-01-03
 
 ### 🎨 UI/UX Nâng Cấp Deadline Management

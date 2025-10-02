@@ -1531,42 +1531,8 @@ function updateCoursesList() {
 // ================= Custom Manual Deadlines ================= //
 async function loadCustomDeadlines() {
     try {
-        console.log('Loading custom deadlines...');
         const res = await window.electronAPI.getCustomDeadlines();
-        console.log('Custom deadlines response:', res);
         appState.customDeadlines = Array.isArray(res?.data) ? res.data : res; // fallback if direct data
-        console.log('Custom deadlines loaded:', appState.customDeadlines);
-        
-        // If no data, add some test data for debugging
-        if (!appState.customDeadlines || appState.customDeadlines.length === 0) {
-            console.log('No custom deadlines found, adding test data...');
-            appState.customDeadlines = [
-                {
-                    id: 'test-1',
-                    title: 'Test Deadline 1',
-                    description: 'This is a test deadline',
-                    dueDate: Math.floor(Date.now() / 1000) + 86400, // tomorrow
-                    completed: false,
-                    color: '#06b6d4',
-                    tags: ['test', 'debug'],
-                    type: 'assignment',
-                    reminderMinutes: 30
-                },
-                {
-                    id: 'test-2',
-                    title: 'Test Deadline 2',
-                    description: 'Another test deadline',
-                    dueDate: Math.floor(Date.now() / 1000) + 172800, // day after tomorrow
-                    completed: false,
-                    color: '#ef4444',
-                    tags: ['test'],
-                    type: 'meeting',
-                    reminderMinutes: 60
-                }
-            ];
-            console.log('Test data added:', appState.customDeadlines);
-        }
-        
         renderCustomDeadlines();
     } catch (e) {
         console.error('Load custom deadlines failed', e);
@@ -1579,10 +1545,8 @@ async function loadCustomDeadlines() {
 function renderCustomDeadlines() {
     const container = document.getElementById('custom-deadlines-list');
     if (!container) {
-        console.error('Custom deadlines container not found');
         return;
     }
-    console.log('Rendering custom deadlines, count:', appState.customDeadlines?.length || 0);
     const filterSelect = document.getElementById('cd-filter-status');
     const filterVal = filterSelect ? filterSelect.value : '';
     const searchInput = document.getElementById('cd-search');
@@ -1717,12 +1681,9 @@ function renderCustomDeadlines() {
             const card = e.target.closest('.custom-deadline-card');
             const id = card?.getAttribute('data-cd-id');
             if (!id) return;
-            if (!confirm('Xóa deadline này?')) return;
-            try {
-                await window.electronAPI.deleteCustomDeadline(id);
-                showNotification('Đã xóa', 'success');
-                loadCustomDeadlines();
-            } catch { showNotification('Lỗi xóa', 'error'); }
+            
+            // Show custom delete confirmation modal
+            showDeleteConfirmation(id);
         });
     });
     container.querySelectorAll('.cd-edit').forEach(btn => {
@@ -1785,6 +1746,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function escapeHtml(str) {
     return String(str||'').replace(/[&<>"]|'/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+}
+
+// Show delete confirmation modal
+function showDeleteConfirmation(deadlineId) {
+    const modal = document.getElementById('delete-confirmation-modal');
+    if (!modal) return;
+    
+    // Store deadline ID for later use
+    modal.dataset.deadlineId = deadlineId;
+    
+    // Show modal and trigger entrance animation
+    modal.classList.remove('hidden');
+    modal.classList.add('showing');
+    document.body.classList.add('no-scroll');
 }
 
 function shorten(str, len) { str = String(str||''); return str.length>len? str.slice(0,len-1)+'…': str; }
@@ -1956,6 +1931,52 @@ document.addEventListener('DOMContentLoaded', () => {
     if (openBtn) openBtn.addEventListener('click', () => openCustomDeadlineModal(null));
     const closeBtn = document.getElementById('close-custom-deadline-modal');
     if (closeBtn) closeBtn.addEventListener('click', closeCustomDeadlineModal);
+    
+    // Delete confirmation modal event listeners
+    const deleteModal = document.getElementById('delete-confirmation-modal');
+    const deleteCancel = document.getElementById('delete-cancel');
+    const deleteConfirm = document.getElementById('delete-confirm');
+    const deleteClose = document.getElementById('delete-modal-close');
+    
+    if (deleteModal && deleteCancel && deleteConfirm && deleteClose) {
+        // Function to close delete modal with animation
+        const closeDeleteModal = () => {
+            deleteModal.classList.remove('showing');
+            setTimeout(() => {
+                deleteModal.classList.add('hidden');
+                document.body.classList.remove('no-scroll');
+            }, 220); // Match modal exit animation duration
+        };
+        
+        // Cancel button
+        deleteCancel.addEventListener('click', closeDeleteModal);
+        
+        // Close button
+        deleteClose.addEventListener('click', closeDeleteModal);
+        
+        // Confirm button
+        deleteConfirm.addEventListener('click', async () => {
+            const deadlineId = deleteModal.dataset.deadlineId;
+            if (deadlineId) {
+                try {
+                    await window.electronAPI.deleteCustomDeadline(deadlineId);
+                    showNotification('Đã xóa deadline', 'success');
+                    loadCustomDeadlines();
+                    closeDeleteModal();
+                } catch (error) {
+                    showNotification('Lỗi xóa deadline', 'error');
+                    closeDeleteModal();
+                }
+            }
+        });
+        
+        // Close on overlay click
+        deleteModal.addEventListener('click', (e) => {
+            if (e.target === deleteModal) {
+                closeDeleteModal();
+            }
+        });
+    }
     // Click outside to close
     const cdModal = document.getElementById('custom-deadline-modal');
     if (cdModal) {

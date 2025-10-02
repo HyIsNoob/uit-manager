@@ -85,7 +85,7 @@ small, .text-xs { font-size: var(--font-xs); line-height: var(--lh-normal); }
 .surface.hoverable:hover { box-shadow: var(--elev-2); transform: translateY(-2px); }
 
 /* Gradient text helper */
-.gradient-text { background: var(--grad-accent); -webkit-background-clip: text; color:transparent; }
+.gradient-text { background: var(--grad-accent); -webkit-background-clip: text; background-clip: text; color:transparent; }
 
 /* Focus ring unified */
 :focus-visible { outline: 2px solid var(--uit-accent); outline-offset:2px; border-radius:4px; }
@@ -2371,6 +2371,28 @@ body {
 
 .btn-add-deadline:hover::before {
     left: 100%;
+}
+
+/* Simple Delete Confirmation Modal */
+#delete-confirmation-modal .modal-content {
+    max-width: 500px;
+    width: 90vw;
+    text-align: center;
+    padding: 0;
+}
+
+#delete-confirmation-modal .modal-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+#delete-confirmation-modal .modal-body {
+    padding: 16px 24px;
+}
+
+#delete-confirmation-modal .modal-footer {
+    padding: 16px 24px;
+    gap: 12px;
 }
 
 /* Enhanced Search Box */
