@@ -73,6 +73,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ensureAssignmentNoteDoc: (assignmentId, name) => ipcRenderer.invoke('ensure-assignment-note-doc', assignmentId, name),
   deleteAssignmentNoteDoc: (assignmentId) => ipcRenderer.invoke('delete-assignment-note-doc', assignmentId),
 
+  // Custom manual deadlines
+  getCustomDeadlines: () => ipcRenderer.invoke('get-custom-deadlines'),
+  createCustomDeadline: (payload) => ipcRenderer.invoke('create-custom-deadline', payload),
+  updateCustomDeadline: (id, updates) => ipcRenderer.invoke('update-custom-deadline', id, updates),
+  toggleCompleteCustomDeadline: (id, completed) => ipcRenderer.invoke('toggle-complete-custom-deadline', id, completed),
+  deleteCustomDeadline: (id) => ipcRenderer.invoke('delete-custom-deadline', id),
+
   // Survey Tools
   startSurvey: (credentials) => ipcRenderer.invoke('start-survey', credentials),
   pauseSurvey: () => ipcRenderer.invoke('pause-survey'),

@@ -39,6 +39,10 @@ const appState = {
     timetableWeekStart: null,
     timetableInited: false,
     courseColors: {}, // code -> {bg,border,accent}
+    customDeadlines: [], // manual deadlines
+    editingCustomDeadlineId: null,
+    cdSearchQuery: '',
+    cdSelectedTags: new Set(),
 };
 
 // DOM elements
@@ -1523,6 +1527,646 @@ function updateCoursesList() {
         `;
     }
 }
+
+// ================= Custom Manual Deadlines ================= //
+async function loadCustomDeadlines() {
+    try {
+        console.log('Loading custom deadlines...');
+        const res = await window.electronAPI.getCustomDeadlines();
+        console.log('Custom deadlines response:', res);
+        appState.customDeadlines = Array.isArray(res?.data) ? res.data : res; // fallback if direct data
+        console.log('Custom deadlines loaded:', appState.customDeadlines);
+        
+        // If no data, add some test data for debugging
+        if (!appState.customDeadlines || appState.customDeadlines.length === 0) {
+            console.log('No custom deadlines found, adding test data...');
+            appState.customDeadlines = [
+                {
+                    id: 'test-1',
+                    title: 'Test Deadline 1',
+                    description: 'This is a test deadline',
+                    dueDate: Math.floor(Date.now() / 1000) + 86400, // tomorrow
+                    completed: false,
+                    color: '#06b6d4',
+                    tags: ['test', 'debug'],
+                    type: 'assignment',
+                    reminderMinutes: 30
+                },
+                {
+                    id: 'test-2',
+                    title: 'Test Deadline 2',
+                    description: 'Another test deadline',
+                    dueDate: Math.floor(Date.now() / 1000) + 172800, // day after tomorrow
+                    completed: false,
+                    color: '#ef4444',
+                    tags: ['test'],
+                    type: 'meeting',
+                    reminderMinutes: 60
+                }
+            ];
+            console.log('Test data added:', appState.customDeadlines);
+        }
+        
+        renderCustomDeadlines();
+    } catch (e) {
+        console.error('Load custom deadlines failed', e);
+        // Fallback: set empty array if API fails
+        appState.customDeadlines = [];
+        renderCustomDeadlines();
+    }
+}
+
+function renderCustomDeadlines() {
+    const container = document.getElementById('custom-deadlines-list');
+    if (!container) {
+        console.error('Custom deadlines container not found');
+        return;
+    }
+    console.log('Rendering custom deadlines, count:', appState.customDeadlines?.length || 0);
+    const filterSelect = document.getElementById('cd-filter-status');
+    const filterVal = filterSelect ? filterSelect.value : '';
+    const searchInput = document.getElementById('cd-search');
+    if (searchInput && appState.cdSearchQuery === '') {
+        // ensure value sync if changed elsewhere
+        // no-op for now
+    }
+    let list = appState.customDeadlines.slice();
+    const nowSecF = Math.floor(Date.now()/1000);
+    if (filterVal === 'active') list = list.filter(i => !i.completed);
+    else if (filterVal === 'completed') list = list.filter(i => i.completed);
+    else if (filterVal === 'overdue') list = list.filter(i => !i.completed && i.dueDate < nowSecF);
+
+    // Text search (title, description, tags, course name)
+    const q = appState.cdSearchQuery.trim().toLowerCase();
+    if (q) {
+        list = list.filter(item => {
+            const course = item.courseId ? appState.courses.find(c=> c.id == item.courseId) : null;
+            const courseName = course ? (course.fullname || course.shortname) : '';
+            const tags = Array.isArray(item.tags)? item.tags.join(' ') : '';
+            return (
+                (item.title||'').toLowerCase().includes(q) ||
+                (item.description||'').toLowerCase().includes(q) ||
+                courseName.toLowerCase().includes(q) ||
+                tags.toLowerCase().includes(q)
+            );
+        });
+    }
+
+    // Sort the list
+    const sortSelect = document.getElementById('cd-sort-order');
+    const sortVal = sortSelect ? sortSelect.value : 'closest';
+    if (sortVal === 'closest') {
+        list.sort((a, b) => (a.dueDate || 0) - (b.dueDate || 0));
+    } else if (sortVal === 'farthest') {
+        list.sort((a, b) => (b.dueDate || 0) - (a.dueDate || 0));
+    } else if (sortVal === 'title') {
+        list.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    } else if (sortVal === 'created') {
+        list.sort((a, b) => (b.id || '').localeCompare(a.id || ''));
+    }
+
+    // Tag filter (AND semantics across selected tags)
+    if (appState.cdSelectedTags.size > 0) {
+        list = list.filter(item => {
+            const tags = new Set(Array.isArray(item.tags)? item.tags.map(t=> t.toLowerCase()): []);
+            for (const t of appState.cdSelectedTags) {
+                if (!tags.has(t)) return false;
+            }
+            return true;
+        });
+    }
+    
+    if (list.length === 0) {
+        container.classList.add('empty');
+        container.innerHTML = '<p class="empty-text">Chưa có deadline thủ công nào.</p>';
+        renderCustomDeadlineTagFilters();
+        return;
+    }
+    container.classList.remove('empty');
+    const nowSec = Math.floor(Date.now()/1000);
+    const urgentDays = Number(appState.urgentDays)||3;
+    container.classList.add('list-enter');
+    container.innerHTML = list.map(item => {
+        const dueClass = !item.completed ? (item.dueDate < nowSec ? 'cd-overdue' : ((item.dueDate - nowSec) <= urgentDays*86400 ? 'cd-soon' : '')) : '';
+        const dueStr = item.dueDate ? new Date(item.dueDate*1000).toLocaleString('vi-VN') : '-';
+        const course = item.courseId ? appState.courses.find(c=> c.id == item.courseId) : null;
+        const courseName = course ? (course.fullname || course.shortname) : null;
+        const tagBadges = (Array.isArray(item.tags)? item.tags: []).map(t=> `<span class=\"cd-badge tag\">#${escapeHtml(shorten(t,16))}</span>`).join('');
+        const reminderBadge = item.reminderMinutes ? `<span class=\"cd-badge remind\" title=\"Nhắc trước ${item.reminderMinutes} phút\"><i class=\"fas fa-bell\"></i> -${item.reminderMinutes}’</span>` : '';
+        const styleBorder = item.color ? `style=\"border-left:6px solid ${item.color};\"` : '';
+        
+        // Calculate countdown
+        const diffMs = item.dueDate ? (item.dueDate * 1000) - Date.now() : 0;
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+        
+        return `
+        <div class="custom-deadline-card ${item.completed ? 'completed' : ''}" data-cd-id="${item.id}" ${styleBorder}>
+            <div class="custom-deadline-header">
+                <div class="custom-deadline-title">
+                    <span class="cd-status-dot ${dueClass}"></span>
+                    <i class="fas fa-bell"></i> <span class="cd-title-text">${escapeHtml(item.title)}</span>
+                </div>
+                <div class="custom-deadline-badges">
+                    ${courseName ? `<span class="cd-badge course" title="${escapeHtml(courseName)}"><i class="fas fa-book"></i> ${escapeHtml(shorten(courseName,32))}</span>` : ''}
+                    ${item.completed ? '<span class="cd-badge completed"><i class="fas fa-check"></i> Hoàn thành</span>' : ''}
+                    ${reminderBadge}
+                    ${tagBadges}
+                </div>
+            </div>
+            ${item.description ? `<div class="custom-deadline-desc">${escapeHtml(item.description)}</div>` : ''}
+            <div class="custom-deadline-footer">
+                <div class="cd-due ${dueClass}">
+                    <i class="fas fa-hourglass-half"></i> ${dueStr}
+                    <span class="cd-countdown ${diffMs < 0 ? 'overdue' : (diffDays <= 1 ? 'soon' : '')}">${diffMs < 0 ? 'Đã quá hạn' : (diffDays <= 1 ? (diffHours < 1 ? `${Math.ceil(diffMs/(1000*60))} phút` : `${diffHours} giờ`) : `${diffDays} ngày`)}</span>
+                </div>
+                <div class="cd-actions">
+                    <label class="cd-complete-toggle">
+                        <input type="checkbox" class="cd-complete-checkbox" ${item.completed ? 'checked' : ''} /> Hoàn thành
+                    </label>
+                    <button class="btn btn-outline btn-small cd-edit" title="Sửa"><i class="fas fa-edit"></i></button>
+                    <button class="btn btn-danger btn-small cd-delete" title="Xóa"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Stagger mount animation
+    const cards = Array.from(container.querySelectorAll('.custom-deadline-card'));
+    cards.forEach((el, idx) => {
+        setTimeout(() => { el.classList.add('mounted'); }, Math.min(40*idx, 320));
+    });
+
+    renderCustomDeadlineTagFilters();
+
+    // add listeners
+    container.querySelectorAll('.cd-complete-checkbox').forEach(cb => {
+        cb.addEventListener('change', async (e) => {
+            const card = e.target.closest('.custom-deadline-card');
+            const id = card?.getAttribute('data-cd-id');
+            if (!id) return;
+            try {
+                await window.electronAPI.toggleCompleteCustomDeadline(id, e.target.checked);
+                showNotification('Đã cập nhật trạng thái', 'success');
+                loadCustomDeadlines();
+            } catch (err) { showNotification('Lỗi cập nhật', 'error'); }
+        });
+    });
+    container.querySelectorAll('.cd-delete').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const card = e.target.closest('.custom-deadline-card');
+            const id = card?.getAttribute('data-cd-id');
+            if (!id) return;
+            if (!confirm('Xóa deadline này?')) return;
+            try {
+                await window.electronAPI.deleteCustomDeadline(id);
+                showNotification('Đã xóa', 'success');
+                loadCustomDeadlines();
+            } catch { showNotification('Lỗi xóa', 'error'); }
+        });
+    });
+    container.querySelectorAll('.cd-edit').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const card = e.target.closest('.custom-deadline-card');
+            const id = card?.getAttribute('data-cd-id');
+            const item = appState.customDeadlines.find(d=> d.id === id);
+            if (!item) return;
+            openCustomDeadlineModal(item);
+        });
+    });
+}
+
+function renderCustomDeadlineTagFilters() {
+    const tagContainer = document.getElementById('cd-tag-filters');
+    if (!tagContainer) return;
+    const allTagsMap = new Map(); // tag -> count
+    appState.customDeadlines.forEach(cd => {
+        (Array.isArray(cd.tags)? cd.tags: []).forEach(t => {
+            const key = String(t||'').trim();
+            if (!key) return;
+            allTagsMap.set(key, (allTagsMap.get(key)||0)+1);
+        });
+    });
+    if (allTagsMap.size === 0) { tagContainer.innerHTML = ''; return; }
+    const sorted = Array.from(allTagsMap.entries()).sort((a,b)=> a[0].localeCompare(b[0], 'vi')); 
+    tagContainer.innerHTML = sorted.map(([tag,count]) => {
+        const active = appState.cdSelectedTags.has(tag.toLowerCase());
+        return `<div class="cd-tag-chip ${active? 'active':''}" data-tag="${escapeHtml(tag)}"><span class="t">#${escapeHtml(shorten(tag,18))}</span><span class="count">${count}</span></div>`;
+    }).join('');
+    tagContainer.querySelectorAll('.cd-tag-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            const t = chip.getAttribute('data-tag');
+            if (!t) return;
+            const low = t.toLowerCase();
+            if (appState.cdSelectedTags.has(low)) appState.cdSelectedTags.delete(low); else appState.cdSelectedTags.add(low);
+            renderCustomDeadlines();
+        });
+    });
+}
+
+// listeners for search + status filter initialization (safe to call once after DOM ready)
+document.addEventListener('DOMContentLoaded', () => {
+    const searchEl = document.getElementById('cd-search');
+    if (searchEl) {
+        searchEl.addEventListener('input', (e)=> {
+            appState.cdSearchQuery = e.target.value;
+            renderCustomDeadlines();
+        });
+    }
+    const statusSel = document.getElementById('cd-filter-status');
+    if (statusSel) {
+        statusSel.addEventListener('change', ()=> renderCustomDeadlines());
+    }
+    const sortSel = document.getElementById('cd-sort-order');
+    if (sortSel) {
+        sortSel.addEventListener('change', ()=> renderCustomDeadlines());
+    }
+});
+
+function escapeHtml(str) {
+    return String(str||'').replace(/[&<>"]|'/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+}
+
+function shorten(str, len) { str = String(str||''); return str.length>len? str.slice(0,len-1)+'…': str; }
+
+function openCustomDeadlineModal(editItem) {
+    appState.editingCustomDeadlineId = editItem ? editItem.id : null;
+    const modal = document.getElementById('custom-deadline-modal');
+    const titleEl = document.getElementById('cd-title');
+    const dateEl = document.getElementById('cd-date');
+    const timeEl = document.getElementById('cd-time');
+    const descEl = document.getElementById('cd-desc');
+    const courseEl = document.getElementById('cd-course-inline');
+    const completedEl = null; // trạng thái đã bỏ khỏi UI
+    const modalTitle = document.getElementById('custom-deadline-modal-title');
+    const colorEl = document.getElementById('cd-color');
+    const tagsEl = document.getElementById('cd-tags');
+    const reminderEl = document.getElementById('cd-reminder');
+    const typeRadios = document.querySelectorAll('input[name="deadline-type"]');
+    if (!modal || !courseEl) return;
+    populateDeadlineCourseOptions();
+    titleEl.value = editItem ? editItem.title : '';
+    descEl.value = editItem ? (editItem.description||'') : '';
+    courseEl.value = editItem && editItem.courseId ? String(editItem.courseId) : '';
+    if (colorEl) colorEl.value = editItem && editItem.color ? editItem.color : '#06b6d4';
+    if (tagsEl) tagsEl.value = editItem && Array.isArray(editItem.tags) ? editItem.tags.join(', ') : '';
+    if (reminderEl) reminderEl.value = editItem && editItem.reminderMinutes ? String(editItem.reminderMinutes) : '';
+    // Set deadline type
+    const deadlineType = editItem && editItem.type ? editItem.type : 'assignment';
+    typeRadios.forEach(radio => {
+        radio.checked = radio.value === deadlineType;
+    });
+    if (editItem && editItem.dueDate) {
+        const dt = new Date(editItem.dueDate*1000);
+        dateEl.value = dt.toISOString().slice(0,10);
+        timeEl.value = dt.toISOString().slice(11,16);
+    } else {
+        dateEl.value = '';
+        timeEl.value = '';
+    }
+    const err = document.getElementById('cd-error'); if (err) err.style.display='none';
+    modalTitle.textContent = editItem ? 'Sửa deadline' : 'Thêm deadline thủ công';
+    // Removed cancel edit button
+    modal.classList.remove('hidden');
+    document.body.classList.add('no-scroll');
+    // force reflow then add showing for CSS transition
+    requestAnimationFrame(()=> {
+        modal.classList.add('showing');
+    });
+}
+
+function closeCustomDeadlineModal() {
+    const modal = document.getElementById('custom-deadline-modal');
+    if (modal) {
+        modal.classList.remove('showing');
+        setTimeout(()=> { modal.classList.add('hidden'); }, 220);
+    }
+    document.body.classList.remove('no-scroll');
+    appState.editingCustomDeadlineId = null;
+}
+
+async function saveCustomDeadlineFromModal() {
+    const titleEl = document.getElementById('cd-title');
+    const dateEl = document.getElementById('cd-date');
+    const timeEl = document.getElementById('cd-time');
+    const descEl = document.getElementById('cd-desc');
+    const courseEl = document.getElementById('cd-course-inline');
+    const completedEl = document.getElementById('cd-completed');
+    const errEl = document.getElementById('cd-error');
+    const colorEl = document.getElementById('cd-color');
+    const tagsEl = document.getElementById('cd-tags');
+    const reminderEl = document.getElementById('cd-reminder');
+    const title = titleEl.value.trim();
+    const dateVal = dateEl.value;
+    const timeVal = timeEl.value;
+    if (!title) { errEl.textContent='Vui lòng nhập tiêu đề'; errEl.style.display='block'; return; }
+    if (!dateVal) { errEl.textContent='Vui lòng chọn ngày'; errEl.style.display='block'; return; }
+    if (!timeVal) { errEl.textContent='Vui lòng chọn thời gian'; errEl.style.display='block'; return; }
+    const dueMs = Date.parse(dateVal + 'T' + timeVal);
+    if (isNaN(dueMs)) { errEl.textContent='Định dạng thời gian không hợp lệ'; errEl.style.display='block'; return; }
+    const dueSec = Math.floor(dueMs/1000);
+    if (dueSec < Math.floor(Date.now()/1000) - 3600) {
+        if (!confirm('Deadline đã ở quá khứ. Tiếp tục?')) return;
+    }
+    // Parse tags
+    let tags = [];
+    if (tagsEl && tagsEl.value.trim()) {
+        tags = tagsEl.value.split(',').map(t=> t.trim()).filter(Boolean).slice(0,10);
+    }
+    const reminderMinutes = reminderEl && reminderEl.value ? Number(reminderEl.value) : null;
+    const color = colorEl && colorEl.value ? colorEl.value : null;
+    const typeRadios = document.querySelectorAll('input[name="deadline-type"]');
+    const selectedType = Array.from(typeRadios).find(radio => radio.checked)?.value || 'assignment';
+    const payload = { title, description: descEl.value.trim(), courseId: courseEl.value || null, dueDate: dueSec, tags, reminderMinutes, color, type: selectedType };
+    try {
+        if (appState.editingCustomDeadlineId) {
+            await window.electronAPI.updateCustomDeadline(appState.editingCustomDeadlineId, payload);
+            showNotification('Đã cập nhật deadline', 'success');
+            // không cập nhật completed từ modal (đã bỏ)
+        } else {
+            await window.electronAPI.createCustomDeadline(payload);
+            showNotification('Đã thêm deadline', 'success');
+        }
+        closeCustomDeadlineModal();
+        loadCustomDeadlines();
+    } catch (e) {
+        errEl.textContent = 'Lưu thất bại: '+ e.message;
+        errEl.style.display='block';
+    }
+}
+
+function populateDeadlineCourseOptions() {
+    const select = document.getElementById('cd-course-inline');
+    if (!select) return;
+    const currentSemesterId = detectCurrentSemesterId();
+    const existing = new Set(Array.from(select.options).map(o=>o.value));
+    // Clear except first placeholder
+    for (let i = select.options.length -1; i >=1; i--) select.remove(i);
+    const courses = appState.courses.filter(c => {
+        if (!currentSemesterId) return true; // fallback
+        return appState.courseSemMap.get(c.id) === currentSemesterId;
+    });
+    courses.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.fullname || c.shortname || ('Course '+c.id);
+        select.appendChild(opt);
+    });
+}
+
+function detectCurrentSemesterId() {
+    // Improved: choose newest semester by (y2,y1,sem) parsed from category name.
+    // Fallback to frequency if parsing insufficient.
+    const semesterScores = []; // {id, y1, y2, sem, name}
+    const freq = new Map();
+    const seen = new Set();
+    appState.courses.forEach(c => {
+        const semId = appState.courseSemMap.get(c.id);
+        if (!semId) return;
+        freq.set(semId, (freq.get(semId)||0)+1);
+        if (seen.has(semId)) return;
+        seen.add(semId);
+        const cat = getCategory(semId);
+        if (!cat) return;
+        const { sem, y1, y2 } = parseSemesterName(cat.name || '');
+        if (y1 && y2) {
+            semesterScores.push({ id: semId, y1, y2, sem: sem || 0, name: cat.name });
+        }
+    });
+    if (semesterScores.length) {
+        semesterScores.sort((a,b)=> {
+            if (b.y2 !== a.y2) return b.y2 - a.y2; // later end year first
+            if (b.y1 !== a.y1) return b.y1 - a.y1; // later start year
+            if (b.sem !== a.sem) return b.sem - a.sem; // higher semester number
+            return 0;
+        });
+        return semesterScores[0].id;
+    }
+    // fallback: frequency heuristic
+    let best = null, max = 0;
+    freq.forEach((count, id) => { if (count > max) { max = count; best = id; } });
+    return best;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('custom-deadline-form');
+    if (form) form.addEventListener('submit', (e)=> { e.preventDefault(); saveCustomDeadlineFromModal(); });
+    // Removed cancel edit button event listener
+    const openBtn = document.getElementById('cd-open-modal');
+    if (openBtn) openBtn.addEventListener('click', () => openCustomDeadlineModal(null));
+    const closeBtn = document.getElementById('close-custom-deadline-modal');
+    if (closeBtn) closeBtn.addEventListener('click', closeCustomDeadlineModal);
+    // Click outside to close
+    const cdModal = document.getElementById('custom-deadline-modal');
+    if (cdModal) {
+        cdModal.addEventListener('click', (e)=> {
+            if (e.target === cdModal) closeCustomDeadlineModal();
+        });
+    }
+
+    // Modal tabs switcher
+    const tabBtns = document.querySelectorAll('.modal-tab');
+    const panes = document.querySelectorAll('.modal-pane');
+    const stepsBar = document.getElementById('cd-steps-bar');
+    const order = ['overview','details','labels'];
+    function setActiveTab(tab) {
+        tabBtns.forEach(b=> b.classList.toggle('active', b.getAttribute('data-tab')===tab));
+        panes.forEach(p=> p.classList.toggle('active', p.getAttribute('data-pane')===tab));
+        if (stepsBar) {
+            const idx = Math.max(0, order.indexOf(tab));
+            const pct = ((idx+1)/order.length)*100;
+            stepsBar.style.width = pct + '%';
+        }
+        
+        // Update next button visibility
+        const nextBtn = document.getElementById('cd-next');
+        if (nextBtn) {
+            const currentIndex = order.indexOf(tab);
+            const isLastTab = currentIndex === order.length - 1;
+            nextBtn.style.display = isLastTab ? 'none' : 'flex';
+        }
+    }
+    if (tabBtns.length && panes.length) {
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', ()=> {
+                const tab = btn.getAttribute('data-tab');
+                setActiveTab(tab);
+            });
+        });
+    }
+
+    // Keyboard shortcuts: Esc to close, Ctrl+Arrow to navigate, 1-3 to jump
+    document.addEventListener('keydown', (e)=> {
+        const modal = document.getElementById('custom-deadline-modal');
+        if (!modal || modal.classList.contains('hidden')) return;
+        if (e.key === 'Escape') { e.preventDefault(); closeCustomDeadlineModal(); return; }
+        
+        // Don't trigger shortcuts when typing in inputs
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.contentEditable === 'true') return;
+        
+        const currentBtn = document.querySelector('.modal-tab.active');
+        const current = currentBtn ? currentBtn.getAttribute('data-tab') : 'overview';
+        let idx = Math.max(0, order.indexOf(current));
+        if (e.ctrlKey && e.key === 'ArrowRight') { idx = Math.min(order.length-1, idx+1); setActiveTab(order[idx]); }
+        if (e.ctrlKey && e.key === 'ArrowLeft') { idx = Math.max(0, idx-1); setActiveTab(order[idx]); }
+        // Only allow number shortcuts when not typing in inputs
+        if (!e.ctrlKey && /^[1-3]$/.test(e.key) && !e.target.closest('input, textarea, [contenteditable]')) { 
+            const n = Number(e.key)-1; 
+            if (order[n]) setActiveTab(order[n]); 
+        }
+    });
+
+    // Auto-advance flow: title -> deadline (removed auto tab switching)
+    const titleEl = document.getElementById('cd-title');
+    if (titleEl) titleEl.addEventListener('keydown', (e)=> { if (e.key==='Enter') { e.preventDefault(); setActiveTab('overview'); const date = document.getElementById('cd-date'); if (date) date.focus(); }});
+    // Removed auto tab switching for date/time changes
+
+    // Next button functionality
+    const nextBtn = document.getElementById('cd-next');
+    if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+            const currentTab = document.querySelector('.modal-tab.active');
+            if (currentTab) {
+                const currentPane = currentTab.getAttribute('data-tab');
+                const tabOrder = ['overview', 'details', 'labels'];
+                const currentIndex = tabOrder.indexOf(currentPane);
+                if (currentIndex < tabOrder.length - 1) {
+                    setActiveTab(tabOrder[currentIndex + 1]);
+                }
+            }
+        });
+        
+        // Update button visibility based on current tab
+        const updateNextButton = () => {
+            const currentTab = document.querySelector('.modal-tab.active');
+            if (currentTab) {
+                const currentPane = currentTab.getAttribute('data-tab');
+                const tabOrder = ['overview', 'details', 'labels'];
+                const currentIndex = tabOrder.indexOf(currentPane);
+                const isLastTab = currentIndex === tabOrder.length - 1;
+                
+                if (isLastTab) {
+                    nextBtn.style.display = 'none';
+                } else {
+                    nextBtn.style.display = 'flex';
+                }
+            }
+        };
+        
+        // Update button on tab change
+        const tabButtons = document.querySelectorAll('.modal-tab');
+        tabButtons.forEach(tab => {
+            tab.addEventListener('click', updateNextButton);
+        });
+        
+        // Initial update
+        updateNextButton();
+    }
+
+    // Type selector visual feedback
+    const typeOptions = document.querySelectorAll('.type-option');
+    typeOptions.forEach(option => {
+        option.addEventListener('click', () => {
+            // Add visual feedback
+            option.style.transform = 'scale(0.98)';
+            setTimeout(() => {
+                option.style.transform = '';
+            }, 150);
+        });
+    });
+    const filterSelect = document.getElementById('cd-filter-status');
+    if (filterSelect) filterSelect.addEventListener('change', renderCustomDeadlines);
+    const sortSelect = document.getElementById('cd-sort-order');
+    if (sortSelect) sortSelect.addEventListener('change', renderCustomDeadlines);
+
+    // Decorative glow follows mouse on list card
+    const listCard = document.querySelector('.custom-deadline-list-card');
+    const glow = document.getElementById('cd-decor-glow');
+    if (listCard && glow) {
+        listCard.addEventListener('mousemove', (e)=> {
+            const rect = listCard.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / rect.width * 100;
+            glow.style.setProperty('--mx', x + '%');
+        });
+    }
+
+    // Quick presets & datetime preview
+    const dateInput = document.getElementById('cd-date');
+    const timeInput = document.getElementById('cd-time');
+    const presetContainer = document.getElementById('cd-quick-presets');
+    const weekdayEl = document.getElementById('cd-due-weekday');
+    const relativeEl = document.getElementById('cd-due-relative');
+    function setDue(date) {
+        if (!dateInput || !timeInput) return; 
+        const dateStr = date.toISOString().slice(0,10);
+        const timeStr = date.toISOString().slice(11,16);
+        dateInput.value = dateStr;
+        timeInput.value = timeStr;
+        updatePreview();
+    }
+    function endOfDay(d) { const dt = new Date(d); dt.setHours(23,59,0,0); return dt; }
+    function nextWeekMonday() {
+        const d = new Date();
+        const day = d.getDay(); // 0=Sun
+        const daysUntilMon = ((8 - day) % 7) || 7; // next Monday
+        d.setDate(d.getDate()+daysUntilMon);
+        d.setHours(8,0,0,0);
+        return d;
+    }
+    function updatePreview() {
+        if (!dateInput || !timeInput) return;
+        const dateVal = dateInput.value;
+        const timeVal = timeInput.value;
+        if (!dateVal || !timeVal) { 
+            if (weekdayEl) weekdayEl.textContent='--'; 
+            if (relativeEl) relativeEl.textContent=''; 
+            return; 
+        }
+        const dt = new Date(dateVal + 'T' + timeVal);
+        if (isNaN(dt.getTime())) return;
+        const weekdays = ['CN','T2','T3','T4','T5','T6','T7'];
+        if (weekdayEl) weekdayEl.textContent = weekdays[dt.getDay()] + ', ' + dt.toLocaleDateString('vi-VN');
+        const diffMs = dt - new Date();
+        if (relativeEl) {
+            if (diffMs < 0) relativeEl.textContent = 'Đã qua';
+            else {
+                const diffH = Math.round(diffMs/3600000);
+                if (diffH < 24) relativeEl.textContent = diffH + 'h nữa';
+                else {
+                    const diffD = Math.round(diffMs/86400000);
+                    relativeEl.textContent = diffD + ' ngày nữa';
+                }
+            }
+        }
+    }
+    if (dateInput) dateInput.addEventListener('input', updatePreview);
+    if (timeInput) timeInput.addEventListener('input', updatePreview);
+    if (presetContainer) {
+        presetContainer.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-preset]');
+            if (!btn) return;
+            const type = btn.getAttribute('data-preset');
+            const now = new Date();
+            if (type === 'today-eod') setDue(endOfDay(now));
+            else if (type === 'tomorrow-eod') { const t = new Date(now); t.setDate(t.getDate()+1); setDue(endOfDay(t)); }
+            else if (type === 'plus3') { const t = new Date(now); t.setDate(t.getDate()+3); setDue(endOfDay(t)); }
+            else if (type === 'nextweek') { setDue(nextWeekMonday()); }
+            else if (type === 'plus1w') { const t = new Date(now); t.setDate(t.getDate()+7); setDue(endOfDay(t)); }
+            else if (type === 'endmonth') { const t = new Date(now); t.setMonth(t.getMonth()+1, 0); t.setHours(23,59,0,0); setDue(t); }
+        });
+    }
+    updatePreview();
+});
+
+// After login success (some existing function should call) we will call loadCustomDeadlines.
+// Hook into existing login logic: find a safe place - simplest: poll for mainApp visible then load once.
+    const cdInitInterval = setInterval(() => {
+        const mainAppEl = document.getElementById('main-app');
+        if (mainAppEl && !mainAppEl.classList.contains('hidden')) {
+            clearInterval(cdInitInterval);
+            loadCustomDeadlines();
+        }
+    }, 1500);
 
 function createCourseCard(course) {
     const semester = appState.courseSemMap.get(course.id) ? 

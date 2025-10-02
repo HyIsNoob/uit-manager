@@ -154,6 +154,12 @@
                             </div>
                             <span class="nav-text">Bài tập</span>
                         </div>
+                        <div class="nav-item" data-section="custom-deadlines">
+                            <div class="nav-icon">
+                                <i class="fas fa-bell"></i>
+                            </div>
+                            <span class="nav-text">Make deadline</span>
+                        </div>
                         
                         <div class="nav-item" data-section="courses">
                             <div class="nav-icon">
@@ -548,6 +554,7 @@
                                 <option value="newest">Sắp xếp: Giao mới nhất</option>
                                 <option value="oldest">Sắp xếp: Giao cũ nhất</option>
                             </select>
+                            <!-- Nút tạo deadline thủ công đã chuyển sang tab riêng -->
                         </div>
                     </div>
                     
@@ -555,6 +562,42 @@
                         <div class="loading-placeholder">
                             <i class="fas fa-spinner fa-spin"></i>
                             <p>Đang tải danh sách bài tập...</p>
+                        </div>
+                    </div>
+
+                </section>
+
+                <!-- Custom Deadlines (Make Deadline) Section -->
+                <section id="custom-deadlines-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Deadline thủ công</h2>
+                        <div class="section-actions">
+                            <button id="cd-open-modal" class="btn btn-primary btn-small"><i class="fas fa-plus"></i> Thêm deadline</button>
+                        </div>
+                    </div>
+                    <div class="custom-deadline-list-card" style="margin-top:8px;">
+                        <div class="decor-glow" id="cd-decor-glow"></div>
+                        <div class="list-header">
+                            <h3><i class="fas fa-list"></i> Danh sách deadline</h3>
+                            <div class="list-filters">
+                                <input type="text" id="cd-search" placeholder="Tìm kiếm deadline..." />
+                                <select id="cd-filter-status">
+                                    <option value="">Lọc: Tất cả</option>
+                                    <option value="active">Chưa hoàn thành</option>
+                                    <option value="completed">Đã hoàn thành</option>
+                                    <option value="overdue">Quá hạn</option>
+                                </select>
+                                <select id="cd-sort-order">
+                                    <option value="closest">Sắp xếp: Gần nhất</option>
+                                    <option value="farthest">Sắp xếp: Xa nhất</option>
+                                    <option value="title">Sắp xếp: Tiêu đề</option>
+                                    <option value="created">Sắp xếp: Mới tạo</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="cd-tag-filters" class="cd-tag-filters" style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px 4px;"></div>
+                        <div id="custom-deadlines-list" class="custom-deadlines-list empty">
+                            <p class="empty-text">Chưa có deadline nào.</p>
                         </div>
                     </div>
                 </section>
@@ -754,6 +797,157 @@
 
     <!-- Notification Container -->
     <div id="notification-container" class="notification-container"></div>
+
+    <!-- Large Custom Deadline Modal -->
+    <div id="custom-deadline-modal" class="modal hidden large-modal">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h3 id="custom-deadline-modal-title">Thêm deadline thủ công</h3>
+                <button class="modal-close" id="close-custom-deadline-modal"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-tabs" role="tablist">
+                    <button type="button" class="modal-tab active" data-tab="overview">Sơ bộ</button>
+                    <button type="button" class="modal-tab" data-tab="details">Chi tiết</button>
+                    <button type="button" class="modal-tab" data-tab="labels">Nhãn & Nhắc</button>
+                </div>
+                <div class="modal-steps" aria-hidden="true">
+                    <div class="track"><div class="bar" id="cd-steps-bar" style="width:33%;"></div></div>
+                </div>
+                <form id="custom-deadline-form" autocomplete="off">
+                    <div class="modal-pane active" data-pane="overview">
+                        <div class="form-section" data-section="type">
+                            <h4 class="section-title"><i class="fas fa-tag"></i> Loại deadline</h4>
+                            <div class="type-selector">
+                                <label class="type-option">
+                                    <input type="radio" name="deadline-type" value="assignment" checked />
+                                    <div class="type-card">
+                                        <i class="fas fa-tasks"></i>
+                                        <span>Bài tập</span>
+                                    </div>
+                                </label>
+                                <label class="type-option">
+                                    <input type="radio" name="deadline-type" value="meeting" />
+                                    <div class="type-card">
+                                        <i class="fas fa-users"></i>
+                                        <span>Buổi họp</span>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="section-divider"></div>
+                        <div class="form-section" data-section="general">
+                            <h4 class="section-title"><i class="fas fa-info-circle"></i> Thông tin chung</h4>
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="cd-title">Tiêu đề <span class="req">*</span></label>
+                                    <input type="text" id="cd-title" maxlength="200" placeholder="Ví dụ: Ôn tập giữa kỳ" />
+                                </div>
+                                <div class="form-group">
+                                    <label for="cd-course-inline">Môn học (học kỳ hiện tại)</label>
+                                    <select id="cd-course-inline">
+                                        <option value="">-- Chọn (tùy chọn) --</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="section-divider"></div>
+                        <div class="form-section" data-section="scheduling">
+                            <h4 class="section-title"><i class="fas fa-clock"></i> Lịch</h4>
+                            <div class="form-grid">
+                                <div class="form-group full">
+                                    <label>Deadline <span class="req">*</span></label>
+                                    <div class="datetime-split">
+                                        <div class="date-time-row">
+                                            <div class="form-group">
+                                                <label for="cd-date">Ngày</label>
+                                                <input type="date" id="cd-date" />
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="cd-time">Thời gian</label>
+                                                <input type="time" id="cd-time" />
+                                            </div>
+                                        </div>
+                                        <div class="datetime-preview" id="cd-due-preview">
+                                            <span class="dp-weekday" id="cd-due-weekday">--</span>
+                                            <span class="dp-relative" id="cd-due-relative"></span>
+                                        </div>
+                                        <div class="quick-presets" id="cd-quick-presets">
+                                            <button type="button" data-preset="today-eod" class="qp-btn">Hôm nay 23:59</button>
+                                            <button type="button" data-preset="tomorrow-eod" class="qp-btn">Ngày mai 23:59</button>
+                                            <button type="button" data-preset="plus3" class="qp-btn">+3 ngày</button>
+                                            <button type="button" data-preset="nextweek" class="qp-btn">Tuần sau</button>
+                                            <button type="button" data-preset="plus1w" class="qp-btn">+1 tuần</button>
+                                            <button type="button" data-preset="endmonth" class="qp-btn">Cuối tháng</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-pane" data-pane="details">
+                        <div class="form-section" data-section="content">
+                            <h4 class="section-title"><i class="fas fa-align-left"></i> Nội dung</h4>
+                            <div class="form-grid">
+                                <div class="form-group full">
+                                    <label for="cd-desc">Mô tả / Ghi chú</label>
+                                    <textarea id="cd-desc" rows="8" maxlength="2000" placeholder="Ghi chú chi tiết về deadline..."></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-pane" data-pane="labels">
+                        <div class="form-section" data-section="labels">
+                            <h4 class="section-title"><i class="fas fa-tags"></i> Nhãn</h4>
+                            <div class="form-grid">
+                                <div class="form-row-split full">
+                                    <div class="form-group">
+                                        <label for="cd-color">Màu</label>
+                                        <input type="color" id="cd-color" value="#06b6d4" />
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cd-tags">Tags (phân tách bằng dấu phẩy)</label>
+                                        <input type="text" id="cd-tags" placeholder="ví dụ: ôn tập, nhóm 3" maxlength="200" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="section-divider"></div>
+                        <div class="form-section" data-section="reminder">
+                            <h4 class="section-title"><i class="fas fa-bell"></i> Nhắc trước</h4>
+                            <div class="form-grid">
+                                <div class="form-group" style="max-width:280px;">
+                                    <label for="cd-reminder">Thời gian nhắc</label>
+                                    <select id="cd-reminder">
+                                        <option value="">-- Không --</option>
+                                        <option value="5">5 phút</option>
+                                        <option value="10">10 phút</option>
+                                        <option value="30">30 phút</option>
+                                        <option value="60">1 giờ</option>
+                                        <option value="120">2 giờ</option>
+                                        <option value="360">6 giờ</option>
+                                        <option value="720">12 giờ</option>
+                                        <option value="1440">1 ngày</option>
+                                        <option value="2880">2 ngày</option>
+                                    </select>
+                                </div>
+                                <div class="form-hint" style="font-size:0.7rem;color:var(--text-muted);align-self:center;">Chỉ nhắc một lần trong khoảng trước deadline.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="cd-error" class="form-error" style="display:none"></div>
+                    <div class="modal-actions end">
+                        <button type="button" id="cd-next" class="btn btn-accent"><i class="fas fa-arrow-right"></i> Tiếp theo</button>
+                        <button type="submit" id="cd-save" class="btn btn-primary"><i class="fas fa-save"></i> Lưu</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
 
     <!-- Assignment Details Modal -->
     <div id="assignment-details-modal" class="modal hidden">

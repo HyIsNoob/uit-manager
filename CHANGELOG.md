@@ -1,3 +1,48 @@
+## [2.4.0] - 2025-01-03
+
+### 🎨 UI/UX Nâng Cấp Deadline Management
+- **Modal 3-tab**: Chia giao diện tạo deadline thành 3 tab (Sơ bộ/Chi tiết/Nhãn) với progress bar
+- **Glassmorphism Design**: Áp dụng hiệu ứng kính mờ hiện đại cho toàn bộ giao diện
+- **Animations & Transitions**: Thêm hiệu ứng chuyển động mượt mà, hover effects, shimmer effects
+- **Responsive Layout**: Tối ưu cho mọi kích thước màn hình
+
+### 🔍 Tìm Kiếm & Sắp Xếp Nâng Cao
+- **Search Enhancement**: Tìm kiếm theo tiêu đề, mô tả, tags, tên môn học
+- **Smart Sorting**: 4 tùy chọn sắp xếp (Gần nhất, Xa nhất, Tiêu đề, Mới tạo)
+- **Filter System**: Lọc theo trạng thái (Tất cả, Chưa hoàn thành, Đã hoàn thành, Quá hạn)
+- **Equal Sizing**: 3 ô search/filter/sort có kích thước cân đối
+
+### ⏰ Countdown Timer & Visual Feedback
+- **Real-time Countdown**: Hiển thị thời gian còn lại trực quan (X phút, X giờ, X ngày)
+- **Color-coded Status**: Màu sắc cảnh báo theo mức độ khẩn cấp
+- **Status Indicators**: Dots và badges trạng thái rõ ràng
+
+### 🎯 Enhanced User Experience
+- **Keyboard Shortcuts**: Esc để đóng, Ctrl+Arrow để chuyển tab, 1-3 để nhảy tab
+- **Auto-advance Prevention**: Không tự động chuyển tab khi đang nhập
+- **Smart Button Logic**: Nút "Tiếp theo" ẩn ở tab cuối
+- **Improved Form Flow**: Logic chuyển tab thông minh
+
+### 🌓 Theme Support
+- **Light/Dark Mode**: Placeholder và styling tối ưu cho cả 2 theme
+- **Consistent Colors**: Màu sắc nhất quán trong mọi điều kiện
+- **Accessibility**: Đảm bảo khả năng tiếp cận tốt
+
+### 🔧 Technical Improvements
+- **Performance**: Tối ưu rendering với will-change và backface-visibility
+- **Error Handling**: Xử lý lỗi tốt hơn với fallback data
+- **Code Quality**: Refactor và clean up code
+- **Debug Support**: Thêm logging để troubleshoot
+
+### 🐛 Bug Fixes
+- **Modal Visibility**: Sửa lỗi modal không hiển thị khi mở
+- **Sort Functionality**: Khắc phục lỗi sắp xếp không hoạt động
+- **Text Visibility**: Sửa lỗi text bị che khuất trong tabs
+- **Color Picker**: Cải thiện visibility và styling
+- **Date/Time Picker**: Nâng cấp giao diện và UX
+
+---
+
 ## [2.3.1] - 2025-09-25
 
 ### UI/UX

@@ -204,6 +204,27 @@ class SmartNotificationManager {
         this.processChanges(newOnes.map(a => ({ type: 'new_assignment', assignment: a, message: `Bài tập mới: ${a.name}` })));
       }
     }
+
+    // After processing assignments, handle manual deadline reminders globally
+    try {
+      const manualDeadlines = store.get('customDeadlines', []);
+      if (Array.isArray(manualDeadlines) && manualDeadlines.length) {
+        const nowMs = Date.now();
+        let mutated = false;
+        manualDeadlines.forEach(d => {
+          if (!d || d.completed) return;
+          if (!d.dueDate || !d.reminderMinutes || d.reminderSent) return;
+          const dueMs = d.dueDate * 1000;
+            if (nowMs >= dueMs - d.reminderMinutes * 60 * 1000 && nowMs < dueMs) {
+              this.showSmartNotification('Nhắc Deadline', `${d.title} còn ${d.reminderMinutes >= 60 ? Math.round(d.reminderMinutes/60)+' giờ' : d.reminderMinutes + ' phút'} nữa đến hạn`, 'deadline');
+              d.reminderSent = true;
+              d.updatedAt = new Date().toISOString();
+              mutated = true;
+            }
+        });
+        if (mutated) store.set('customDeadlines', manualDeadlines);
+      }
+    } catch (e) { console.warn('Failed manual deadline reminder check:', e.message); }
   }
 
   // Show Windows Toast notification
@@ -1976,6 +1997,90 @@ ipcMain.handle('quit-and-install', () => {
   } catch (error) {
     return { success: false, error: error.message };
   }
+});
+
+// ===== CUSTOM MANUAL DEADLINES (Local Reminders) =====
+// Stored in electron-store under key 'customDeadlines'
+// Schema: { id, title, description, courseId, dueDate(sec), completed, color, tags[], reminderMinutes, reminderSent, createdAt, updatedAt }
+
+function loadCustomDeadlines() {
+  try { return store.get('customDeadlines', []); } catch { return []; }
+}
+function saveCustomDeadlines(list) { try { store.set('customDeadlines', list); } catch {} }
+
+ipcMain.handle('get-custom-deadlines', () => {
+  try { return { success:true, data: loadCustomDeadlines() }; } catch (e) { return { success:false, error:e.message }; }
+});
+
+ipcMain.handle('create-custom-deadline', (event, payload) => {
+  try {
+    if (!payload || !payload.title || !payload.dueDate) throw new Error('Thiếu tiêu đề hoặc hạn chót');
+    const list = loadCustomDeadlines();
+    const nowIso = new Date().toISOString();
+    const item = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
+      title: String(payload.title).trim().slice(0,200),
+      description: String(payload.description||'').trim().slice(0,2000),
+      courseId: payload.courseId || null,
+      dueDate: Number(payload.dueDate),
+      completed: false,
+      color: payload.color && /^#?[0-9a-fA-F]{6}$/.test(payload.color) ? (payload.color.startsWith('#')? payload.color : '#'+payload.color) : null,
+      tags: Array.isArray(payload.tags) ? payload.tags.slice(0,10).map(t=> String(t).trim().slice(0,30)).filter(Boolean) : [],
+      reminderMinutes: payload.reminderMinutes ? Number(payload.reminderMinutes) : null,
+      reminderSent: false,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+    list.push(item); saveCustomDeadlines(list);
+    return { success:true, data:item };
+  } catch(e) { return { success:false, error:e.message }; }
+});
+
+ipcMain.handle('update-custom-deadline', (event, id, updates) => {
+  try {
+    const list = loadCustomDeadlines();
+    const idx = list.findIndex(d=> d.id === id);
+    if (idx === -1) throw new Error('Không tìm thấy deadline');
+    const nowIso = new Date().toISOString();
+    const current = list[idx];
+    const patched = {
+      ...current,
+      title: updates.title !== undefined ? String(updates.title).trim().slice(0,200) : current.title,
+      description: updates.description !== undefined ? String(updates.description).trim().slice(0,2000) : current.description,
+      courseId: updates.courseId !== undefined ? updates.courseId : current.courseId,
+      dueDate: updates.dueDate !== undefined ? Number(updates.dueDate) : current.dueDate,
+      color: updates.color !== undefined ? (updates.color && /^#?[0-9a-fA-F]{6}$/.test(updates.color) ? (updates.color.startsWith('#')? updates.color : '#'+updates.color) : null) : current.color || null,
+      tags: updates.tags !== undefined ? (Array.isArray(updates.tags) ? updates.tags.slice(0,10).map(t=> String(t).trim().slice(0,30)).filter(Boolean) : current.tags) : current.tags,
+      reminderMinutes: updates.reminderMinutes !== undefined ? (updates.reminderMinutes ? Number(updates.reminderMinutes) : null) : current.reminderMinutes || null,
+      reminderSent: (updates.dueDate !== undefined || updates.reminderMinutes !== undefined) ? false : current.reminderSent || false,
+      updatedAt: nowIso
+    };
+    list[idx] = patched; saveCustomDeadlines(list);
+    return { success:true, data:patched };
+  } catch(e) { return { success:false, error:e.message }; }
+});
+
+ipcMain.handle('toggle-complete-custom-deadline', (event, id, completed) => {
+  try {
+    const list = loadCustomDeadlines();
+    const idx = list.findIndex(d=> d.id === id);
+    if (idx === -1) throw new Error('Không tìm thấy deadline');
+    list[idx].completed = completed !== undefined ? Boolean(completed) : !list[idx].completed;
+    list[idx].updatedAt = new Date().toISOString();
+    saveCustomDeadlines(list);
+    return { success:true, data:list[idx] };
+  } catch(e) { return { success:false, error:e.message }; }
+});
+
+ipcMain.handle('delete-custom-deadline', (event, id) => {
+  try {
+    const list = loadCustomDeadlines();
+    const idx = list.findIndex(d=> d.id === id);
+    if (idx === -1) throw new Error('Không tìm thấy deadline');
+    const removed = list.splice(idx,1)[0];
+    saveCustomDeadlines(list);
+    return { success:true, data:removed };
+  } catch(e) { return { success:false, error:e.message }; }
 });
 
 // ===== SURVEY AUTOMATION LOGIC =====

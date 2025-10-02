@@ -6,7 +6,7 @@
 
   <p>
     <a href="https://github.com/HyIsNoob/uit-manager"><img alt="Repo" src="https://img.shields.io/badge/GitHub-uit--manager-000?logo=github" /></a>
-    <img alt="Version" src="https://img.shields.io/badge/version-2.0.0-blue" />
+    <img alt="Version" src="https://img.shields.io/badge/version-2.4.0-blue" />
     <img alt="License" src="https://img.shields.io/badge/license-MIT-green" />
     <img alt="Electron" src="https://img.shields.io/badge/Electron-38.x-47848F?logo=electron" />
   </p>
@@ -28,6 +28,18 @@
 - **Thời Khóa Biểu**: Import từ file .ics, hiển thị dynamic theo giờ và thứ realtime.
 - **Hệ Thống Ghi Chú**: Tự tạo và quản lý file word theo từng môn, từng bài tập, thêm xóa sửa.
 - **Settings**: Nhiều option settings tùy nhu cầu (mở cùng windows, chạy ngầm, thông báo, dark/light mode)
+- **Deadline thủ công (Manual)**: Tạo deadline / reminder cá nhân (không có trên Moodle) với:
+  - Tiêu đề, mô tả, liên kết môn (lọc tự động theo học kỳ hiện tại mới nhất)
+  - Chọn trạng thái hoàn thành
+  - Bộ chọn thời gian nâng cao + nút nhanh: Hôm nay 23:59, Ngày mai 23:59, +3 ngày, Tuần sau, +1 tuần, Cuối tháng
+  - Xem nhanh thứ & thời gian còn lại ngay trong modal
+  - Lưu trữ cục bộ (không đồng bộ Moodle)
+  - Màu tùy chỉnh & Tags gắn nhiều nhãn (#ôn tập, #nhóm …)
+  - Nhắc trước X phút/giờ/ngày (notification tự động một lần)
+  - **Giao diện nâng cấp v2.4.0**: Modal 3-tab (Sơ bộ/Chi tiết/Nhãn), sắp xếp đa dạng, tìm kiếm nâng cao
+  - **Countdown timer**: Hiển thị thời gian còn lại trực quan với màu sắc cảnh báo
+  - **Sắp xếp thông minh**: Theo deadline gần nhất, xa nhất, tên, thời gian tạo
+  - **UI/UX hiện đại**: Glassmorphism, animations, responsive design
 
 > Demo hình ảnh các tính năng ở dưới
 
@@ -78,6 +90,13 @@ npm run release # Đóng gói và publish lên GitHub (nếu cấu hình)
    - Bấm “Đăng ký tài khoản”
 3. Đăng nhập bằng MSSV đã lưu
 4. Xem danh sách môn học, bài tập; theo dõi deadline và trạng thái nộp
+5. Thêm deadline thủ công:
+
+  - Mở tab "Deadline" (hoặc biểu tượng tương ứng nếu bạn đã đổi tên)
+  - Bấm nút "Thêm deadline" để mở modal cỡ lớn
+  - Dùng các nút preset: Hôm nay 23:59 / Ngày mai 23:59 / +3 ngày / Tuần sau / +1 tuần / Cuối tháng
+  - Chọn môn (danh sách đã lọc theo học kỳ hiện tại tự phát hiện)
+  - Lưu lại. Có thể sửa / đánh dấu hoàn thành bất cứ lúc nào.
 
 ### Lấy token API Moodle
 
@@ -116,6 +135,15 @@ Các endpoint Moodle sử dụng:
   - Bấm làm mới dữ liệu hoặc đăng nhập lại
 - Lỗi cài đặt trên Windows?
   - Tải đúng phiên bản `.exe` phù hợp và đóng các phiên bản đang chạy trước khi cài
+- Thêm deadline thủ công báo lỗi "No handler registered for create-custom-deadline"?
+
+  - Nguyên nhân: Main process chưa được reload sau khi cập nhật tính năng mới.
+  - Cách xử lý: Đóng hoàn toàn ứng dụng (thoát khỏi khay hệ thống nếu có) rồi mở lại / hoặc chạy lại `npm start` trong môi trường dev.
+  - Đảm bảo file `main.js` đã chứa các IPC handler: `get-custom-deadlines`, `create-custom-deadline`, ...
+- Nhắc trước không hiện?
+  - Chỉ kích hoạt 1 lần khi thời gian hiện tại nằm trong khoảng (due - offset) < now < due.
+  - Chỉnh sửa deadline sẽ reset trạng thái nhắc.
+  - Kiểm tra phần cài đặt thông báo đã bật Toast/In-app.
 
 ## Demo Chi Tiết Tính Năng
 
