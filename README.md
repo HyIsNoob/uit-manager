@@ -14,7 +14,7 @@
 
 ---
 
-## ✨ Tính Năng
+## Tính Năng
 
 - **Đăng nhập bằng MSSV**: Bind token vào MSSV cho lần đầu tiên, tài khoản được lưu trữ để đăng nhập nhanh hon!
 > lưu ý: tick Bỏ qua kiểm tra chứng chỉ TLS nếu không đăng nhập được
@@ -43,14 +43,14 @@
 
 > Demo hình ảnh các tính năng ở dưới
 
-## 📦 Tải xuống
+## Tải xuống
 
 - Tự build bằng npm run dist
 - Hoặc theo dõi mục Releases trên repo.
 
 > Lưu ý: Ứng dụng hỗ trợ Windows 10/11. macOS/Linux có thể build từ source.
 
-## 🔧 Cài đặt từ mã nguồn
+## Cài đặt từ mã nguồn
 
 ### Yêu cầu
 
@@ -81,7 +81,7 @@ npm run dist  # Đóng gói, không publish
 npm run release # Đóng gói và publish lên GitHub (nếu cấu hình)
 ```
 
-## 🚪 Hướng dẫn sử dụng nhanh
+## Hướng dẫn sử dụng nhanh
 
 1. Mở ứng dụng → chờ màn hình loading
 2. Đăng ký tài khoản lần đầu:
@@ -105,7 +105,7 @@ npm run release # Đóng gói và publish lên GitHub (nếu cấu hình)
 3. Tạo token cho dịch vụ “Moodle mobile web service” (Tái lập)
 4. Sao chép token và dán vào ứng dụng
 
-## 🧩 Kiến trúc & Công nghệ
+## Kiến trúc & Công nghệ
 
 - Electron (Desktop framework)
 - Renderer: HTML5, CSS3, JavaScript (ES6+)
@@ -122,13 +122,13 @@ Các endpoint Moodle sử dụng:
 - `mod_assign_get_assignments`
 - `mod_assign_get_submission_status`
 
-## 🔐 Bảo mật
+## Bảo mật
 
 - Token được mã hóa và lưu trữ cục bộ
 - Tất cả request sử dụng HTTPS
 - Không gửi dữ liệu người dùng lên máy chủ bên thứ ba
 
-## ❓ Câu hỏi thường gặp (FAQ)
+## Câu hỏi thường gặp (FAQ)
 
 - Không thấy bài tập sau khi đăng nhập?
   - Kiểm tra token còn hạn và có quyền “Moodle mobile web service”
