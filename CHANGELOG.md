@@ -1,3 +1,18 @@
+## [3.1.0] - 2025-01-04
+
+### Tính năng mới
+- **Tự động đăng nhập**: Tự động đăng nhập tài khoản đã đăng nhập gần nhất khi mở app
+  - Nếu chỉ có 1 tài khoản → tự động đăng nhập luôn
+  - Nếu có nhiều tài khoản → tự động đăng nhập tài khoản đã đăng nhập gần nhất
+  - Loading screen hiển thị trong suốt quá trình auto login và load dữ liệu
+  - Không còn màn hình trắng khi auto login
+
+### Cải tiến
+- **UX**: Cải thiện trải nghiệm khởi động app với loading screen mượt mà
+- **Performance**: Tối ưu flow khởi động để giảm thời gian chờ
+
+---
+
 ## [3.0.0] - 2025-01-04
 
 ### Tính năng mới

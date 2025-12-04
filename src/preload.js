@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Account management
   saveAccount: (studentId, token) => ipcRenderer.invoke('save-account', studentId, token),
   getSavedAccounts: () => ipcRenderer.invoke('get-saved-accounts'),
+  getLastLoginAccount: () => ipcRenderer.invoke('get-last-login-account'),
   loginWithStudentId: (studentId) => ipcRenderer.invoke('login-with-student-id', studentId),
   removeAccount: (studentId) => ipcRenderer.invoke('remove-account', studentId),
   

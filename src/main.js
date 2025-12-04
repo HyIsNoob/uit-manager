@@ -1710,8 +1710,38 @@ ipcMain.handle('get-saved-accounts', () => {
   return Object.keys(accounts).map(studentId => ({
     studentId,
     username: accounts[studentId]?.username || studentId,
-    fullname: accounts[studentId]?.fullname || accounts[studentId]?.username || studentId
+    fullname: accounts[studentId]?.fullname || accounts[studentId]?.username || studentId,
+    lastLogin: accounts[studentId]?.lastLogin || accounts[studentId]?.savedAt || null
   }));
+});
+
+// Lấy tài khoản đăng nhập gần nhất
+ipcMain.handle('get-last-login-account', () => {
+  const accounts = store.get('accounts', {});
+  const accountEntries = Object.entries(accounts);
+  
+  if (accountEntries.length === 0) {
+    return null;
+  }
+  
+  // Nếu chỉ có 1 tài khoản, trả về tài khoản đó
+  if (accountEntries.length === 1) {
+    return accountEntries[0][0]; // studentId
+  }
+  
+  // Tìm tài khoản có lastLogin gần nhất
+  let lastLoginAccount = null;
+  let lastLoginTime = null;
+  
+  accountEntries.forEach(([studentId, account]) => {
+    const loginTime = account.lastLogin || account.savedAt;
+    if (loginTime && (!lastLoginTime || loginTime > lastLoginTime)) {
+      lastLoginTime = loginTime;
+      lastLoginAccount = studentId;
+    }
+  });
+  
+  return lastLoginAccount;
 });
 
 // Đăng nhập bằng mã số sinh viên

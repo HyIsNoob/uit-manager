@@ -3168,6 +3168,11 @@ async function initializeApp() {
 
         // Start realtime clock
         startRealtimeClock();
+        
+        // Hide loading screen after everything is loaded (if still visible)
+        if (elements.loadingScreen && !elements.loadingScreen.classList.contains('hidden')) {
+            elements.loadingScreen.classList.add('hidden');
+        }
 
     // Scroll-to-top button
     (function initScrollTop(){
@@ -6326,12 +6331,6 @@ function filterCoursesBySemester() {
 
 // App initialization
 async function init() {
-    // Hide loading screen
-    setTimeout(() => {
-        elements.loadingScreen.classList.add('hidden');
-        elements.loginScreen.classList.remove('hidden');
-    }, 2000);
-    
     // Setup event listeners
     setupEventListeners();
     await applyThemeFromSettings();
@@ -6344,6 +6343,54 @@ async function init() {
     
     // Load saved accounts
     await loadSavedAccounts();
+    
+    // Try auto login
+    try {
+        const lastLoginStudentId = await window.electronAPI.getLastLoginAccount();
+        if (lastLoginStudentId) {
+            // Keep loading screen visible during auto login
+            // Don't hide it yet - we'll hide it after login completes
+            
+            // Auto login
+            const result = await window.electronAPI.loginWithStudentId(lastLoginStudentId);
+            
+            if (result.success) {
+                appState.currentUser = result.userInfo;
+                appState.currentToken = result.token;
+                appState.currentStudentId = lastLoginStudentId;
+                
+                // Initialize app (this will load data)
+                await initializeApp();
+                
+                // Hide loading screen after everything is loaded
+                elements.loadingScreen.classList.add('hidden');
+                return; // Skip showing login screen
+            } else {
+                // If auto login fails, show login screen
+                console.warn('Auto login failed:', result.error);
+                // Hide loading screen and show login screen
+                setTimeout(() => {
+                    elements.loadingScreen.classList.add('hidden');
+                    elements.loginScreen.classList.remove('hidden');
+                }, 500);
+                return;
+            }
+        }
+    } catch (error) {
+        console.error('Auto login error:', error);
+        // On error, show login screen
+        setTimeout(() => {
+            elements.loadingScreen.classList.add('hidden');
+            elements.loginScreen.classList.remove('hidden');
+        }, 500);
+        return;
+    }
+    
+    // No auto login - hide loading screen and show login screen
+    setTimeout(() => {
+        elements.loadingScreen.classList.add('hidden');
+        elements.loginScreen.classList.remove('hidden');
+    }, 2000);
     
     // Listen for saved accounts from main process
     window.electronAPI.onHasSavedAccounts((event, accounts) => {

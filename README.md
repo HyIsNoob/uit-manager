@@ -6,7 +6,7 @@
 
   <p>
     <a href="https://github.com/HyIsNoob/uit-manager"><img alt="Repo" src="https://img.shields.io/badge/GitHub-uit--manager-000?logo=github" /></a>
-    <img alt="Version" src="https://img.shields.io/badge/version-3.0.0-blue" />
+    <img alt="Version" src="https://img.shields.io/badge/version-3.1.0-blue" />
     <img alt="License" src="https://img.shields.io/badge/license-MIT-green" />
     <img alt="Electron" src="https://img.shields.io/badge/Electron-38.x-47848F?logo=electron" />
   </p>
