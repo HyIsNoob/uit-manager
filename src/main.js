@@ -478,7 +478,8 @@ function createWindow() {
     icon: path.join(__dirname, '../assets/icon.png'),
     titleBarStyle: 'default',
     show: false,
-    backgroundColor: '#1a1a1a'
+    backgroundColor: '#1a1a1a',
+    autoHideMenuBar: true
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
@@ -1926,6 +1927,34 @@ ipcMain.handle('import-ics-file', async () => {
     const content = fs.readFileSync(filePath, 'utf8');
     store.set('timetable.ics', content);
     return { success: true, content, filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Import Excel exam schedule file
+ipcMain.handle('import-exam-schedule-file', async () => {
+  try {
+    const XLSX = require('xlsx');
+    const win = BrowserWindow.getFocusedWindow() || (typeof mainWindow !== 'undefined' ? mainWindow : undefined);
+    const options = {
+      title: 'Chọn file lịch thi (*.xlsx, *.xls)',
+      filters: [
+        { name: 'Excel Files', extensions: ['xlsx', 'xls'] },
+        { name: 'All Files', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    };
+    const res = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    if (res.canceled || !res.filePaths || !res.filePaths[0]) {
+      return { success: false, cancelled: true };
+    }
+    const filePath = res.filePaths[0];
+    const workbook = XLSX.readFile(filePath);
+    const firstSheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[firstSheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+    return { success: true, data, filePath };
   } catch (e) {
     return { success: false, error: e.message };
   }

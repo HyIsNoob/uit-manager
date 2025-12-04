@@ -1,3 +1,36 @@
+## [3.0.0] - 2025-01-04
+
+### Tính năng mới
+- **Lịch thi**: Module quản lý lịch thi hoàn toàn mới
+  - Import file Excel lịch thi từ trường
+  - Tự động lọc và hiển thị chỉ các môn thi của các môn học đang học trong học kỳ hiện tại
+  - Lọc theo lớp học (ví dụ: CS431.Q12 chỉ hiển thị Q12)
+  - Gộp các exam cùng môn/lớp/giờ nhưng khác phòng thành 1 card
+  - Filter theo ngày thi
+  - Hiển thị đầy đủ thông tin: ngày thi, giờ thi, phòng thi, giảng viên, lớp
+  - UI với animations và hover effects
+
+### UI/UX Improvements
+- **Sidebar**: Fix position để luôn hiển thị khi scroll
+- **Menu bar**: Ẩn menu bar (File, Edit, View, Window, Help) để giao diện gọn hơn
+- **Exam Schedule UI**: 
+  - Animations mượt mà (fadeInUp, slideInLeft, fadeInScale, pulse)
+  - Hover effects với transform và shadow
+  - Visual feedback với border accent và gradient backgrounds
+
+### Technical Improvements
+- Thêm thư viện `xlsx` để đọc file Excel
+- Parse Excel tự động tìm header
+- Logic lọc chính xác theo mã môn học và lớp học
+- Lưu/load local storage giống thời khóa biểu
+- Tự động re-filter khi courses được load
+
+### Bug Fixes
+- Sửa sidebar bị overlap với header
+- Sửa logic lọc để chỉ hiển thị môn học của học kỳ hiện tại
+
+---
+
 ## [2.4.1] - 2025-01-03
 
 ### 🐛 Bug Fixes

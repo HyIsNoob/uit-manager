@@ -1,6 +1,6 @@
 {
   "name": "uit-assignment-manager",
-  "version": "2.4.1",
+  "version": "3.0.0",
   "description": "Ứng dụng quản lý bài tập cho sinh viên UIT",
   "main": "src/main.js",
   "scripts": {
@@ -27,7 +27,8 @@
     "electron-store": "^8.1.0",
     "electron-updater": "^6.3.9",
     "node-notifier": "^10.0.1",
-    "puppeteer": "^24.22.3"
+    "puppeteer": "^24.22.3",
+    "xlsx": "^0.18.5"
   },
   "build": {
     "appId": "com.uit.assignment-manager",

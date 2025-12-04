@@ -66,6 +66,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setAutoStart: (enabled) => ipcRenderer.invoke('set-auto-start', enabled),
   // Import ICS
   importIcsFile: () => ipcRenderer.invoke('import-ics-file'),
+  // Import Exam Schedule Excel
+  importExamScheduleFile: () => ipcRenderer.invoke('import-exam-schedule-file'),
 
   // Word-backed Notes (RTF)
   ensureCourseNoteDoc: (courseId, courseName) => ipcRenderer.invoke('ensure-course-note-doc', courseId, courseName),

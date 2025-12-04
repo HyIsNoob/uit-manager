@@ -43,6 +43,10 @@ const appState = {
     editingCustomDeadlineId: null,
     cdSearchQuery: '',
     cdSelectedTags: new Set(),
+    // Exam Schedule
+    examSchedule: [], // filtered exam schedule for enrolled courses
+    examScheduleRaw: [], // raw data from Excel
+    examScheduleFiltered: [], // currently displayed exams after filtering
 };
 
 // DOM elements
@@ -171,6 +175,11 @@ const elements = {
     ,saveCourseColor: document.getElementById('save-course-color')
     ,resetCourseColor: document.getElementById('reset-course-color')
     ,closeCourseColor: document.getElementById('close-course-color')
+    // Exam Schedule elements
+    ,importExamScheduleBtn: document.getElementById('import-exam-schedule-btn')
+    ,examScheduleList: document.getElementById('exam-schedule-list')
+    ,examScheduleEmpty: document.getElementById('exam-schedule-empty')
+    ,examFilterDate: document.getElementById('exam-filter-date')
 };
 // THEME
 async function applyThemeFromSettings() {
@@ -515,6 +524,15 @@ async function loadUserCourses() {
             }
             appState.coursesByCategory.get(catId).push(course);
         });
+        
+        // Re-filter exam schedule if raw data exists (only current semester courses)
+        if (appState.examScheduleRaw && appState.examScheduleRaw.length > 0) {
+            const currentSemesterCourses = getCurrentSemesterCourses();
+            const filtered = filterExamScheduleByCourses(appState.examScheduleRaw, currentSemesterCourses);
+            appState.examSchedule = filtered;
+            await window.electronAPI.setSetting('examSchedule.filtered', filtered);
+            renderExamSchedule();
+        }
         
         return appState.courses;
     } catch (error) {
@@ -3134,6 +3152,9 @@ async function initializeApp() {
 
         // Initialize Timetable UI (bind buttons and load saved ICS)
         await initTimetableUI();
+        
+        // Initialize Exam Schedule UI
+        await initExamScheduleUI();
 
     // Populate instructor names asynchronously for visible courses
     populateCourseInstructors().catch(e => console.warn('Populate instructors failed:', e.message));
@@ -5507,6 +5528,9 @@ function setupEventListeners() {
             }
                 // Init timetable UI
                 await initTimetableUI();
+                
+                // Init exam schedule UI
+                await initExamScheduleUI();
 
         });
     }
@@ -6818,6 +6842,404 @@ var errorLog = (message) => console.log('%c' + message, 'font-weight:bold; color
         }
     });
 })();
+
+// Exam Schedule Functions
+function parseExamScheduleExcel(data) {
+    if (!Array.isArray(data) || data.length < 7) {
+        throw new Error('Dữ liệu Excel không hợp lệ');
+    }
+    
+    let headerRowIndex = -1;
+    const headerMap = {
+        'STT': 0, 'Mã MH': 1, 'Tên MH': 2, 'Mã lớp': 3, 'Giảng Viên LT': 4,
+        'Khóa học': 5, 'Khoa QL': 6, 'Ngày thi': 7, 'Thứ': 8, 'Ca Thi': 9,
+        'Phòng Thi': 10, 'Số SV': 11, 'Hệ ĐT': 12, 'Đợt thi': 13, 'Lần thi': 14,
+        'Học kỳ': 15, 'Năm học': 16
+    };
+    
+    for (let i = 0; i < Math.min(15, data.length); i++) {
+        const row = data[i];
+        if (Array.isArray(row) && row.length > 1) {
+            const firstCell = String(row[0] || '').trim();
+            const secondCell = String(row[1] || '').trim();
+            if (firstCell === 'STT' && (secondCell.includes('Mã MH') || secondCell.includes('Mã'))) {
+                headerRowIndex = i;
+                break;
+            }
+        }
+    }
+    
+    if (headerRowIndex === -1) {
+        throw new Error('Không tìm thấy dòng header trong file Excel');
+    }
+    
+    const exams = [];
+    for (let i = headerRowIndex + 1; i < data.length; i++) {
+        const row = data[i];
+        if (!Array.isArray(row) || row.length < 2) continue;
+        
+        const maMH = String(row[1] || '').trim();
+        if (!maMH || maMH === 'Mã MH') continue;
+        
+        const ngayThi = String(row[7] || '').trim();
+        if (!ngayThi) continue;
+        
+        const exam = {
+            stt: String(row[0] || '').trim(),
+            maMH: maMH,
+            tenMH: String(row[2] || '').trim(),
+            maLop: String(row[3] || '').trim(),
+            giangVien: String(row[4] || '').trim(),
+            khoaHoc: String(row[5] || '').trim(),
+            khoaQL: String(row[6] || '').trim(),
+            ngayThi: ngayThi,
+            thu: String(row[8] || '').trim(),
+            caThi: String(row[9] || '').trim(),
+            phongThi: String(row[10] || '').trim(),
+            soSV: String(row[11] || '').trim(),
+            heDT: String(row[12] || '').trim(),
+            dotThi: String(row[13] || '').trim(),
+            lanThi: String(row[14] || '').trim(),
+            hocKy: String(row[15] || '').trim(),
+            namHoc: String(row[16] || '').trim()
+        };
+        
+        exams.push(exam);
+    }
+    
+    return exams;
+}
+
+function extractCourseCodeBase(text) {
+    if (!text) return null;
+    const upper = String(text).trim().toUpperCase();
+    const match = upper.match(/^([A-Z]{2,}\d{2,3})/);
+    return match ? match[1] : null;
+}
+
+function extractClassCode(text) {
+    if (!text) return null;
+    const upper = String(text).trim().toUpperCase();
+    const match = upper.match(/\.([A-Z]\d{2,3})(?:\.|$)/);
+    return match ? match[1] : null;
+}
+
+function extractFullCourseCode(text) {
+    if (!text) return null;
+    const upper = String(text).trim().toUpperCase();
+    const match = upper.match(/^([A-Z]{2,}\d{2,3}\.[A-Z]\d{2,3})/);
+    return match ? match[1] : null;
+}
+
+function getCurrentSemesterCourses() {
+    const currentSemesterId = detectCurrentSemesterId();
+    if (!currentSemesterId) {
+        console.log('No current semester detected, using all courses');
+        return appState.courses;
+    }
+    
+    const currentCourses = appState.courses.filter(course => {
+        const courseSemId = appState.courseSemMap.get(course.id);
+        return courseSemId === currentSemesterId;
+    });
+    
+    console.log(`Current semester courses: ${currentCourses.length} out of ${appState.courses.length} total courses`);
+    return currentCourses;
+}
+
+function filterExamScheduleByCourses(exams, courses) {
+    if (!exams || !courses || courses.length === 0) return [];
+    
+    const courseClassMap = new Map();
+    courses.forEach(course => {
+        const shortname = String(course.shortname || '').trim();
+        const fullname = String(course.fullname || '').trim();
+        
+        const codeBase = extractCourseCodeBase(shortname) || extractCourseCodeBase(fullname);
+        if (!codeBase) return;
+        
+        const classCode = extractClassCode(shortname) || extractClassCode(fullname);
+        if (!classCode) return;
+        
+        if (!courseClassMap.has(codeBase)) {
+            courseClassMap.set(codeBase, new Set());
+        }
+        courseClassMap.get(codeBase).add(classCode);
+    });
+    
+    console.log('Course classes extracted:', Array.from(courseClassMap.entries()).map(([code, classes]) => 
+        `${code}: [${Array.from(classes).join(', ')}]`
+    ));
+    
+    const filtered = exams.filter(exam => {
+        const maMH = String(exam.maMH || '').trim();
+        const maLop = String(exam.maLop || '').trim();
+        if (!maMH || !maLop) return false;
+        
+        const examCodeBase = extractCourseCodeBase(maMH);
+        if (!examCodeBase) return false;
+        
+        const examClassCode = extractClassCode(maLop);
+        if (!examClassCode) return false;
+        
+        const allowedClasses = courseClassMap.get(examCodeBase);
+        if (!allowedClasses) return false;
+        
+        const isMatch = allowedClasses.has(examClassCode);
+        if (isMatch) {
+            console.log(`Matched exam: ${maMH} - ${maLop} (class: ${examClassCode})`);
+        }
+        return isMatch;
+    });
+    
+    return filtered;
+}
+
+function formatExamDate(dateStr) {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+        return `${parts[0]}/${parts[1]}/${parts[2]}`;
+    }
+    return dateStr;
+}
+
+function parseExamDate(dateStr) {
+    if (!dateStr) return null;
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const year = parseInt(parts[2], 10);
+        return new Date(year, month, day);
+    }
+    return null;
+}
+
+function getCaThiTime(caThi) {
+    const caMap = {
+        '1': '7:30',
+        '2': '9:30',
+        '3': '13:30',
+        '4': '15:30'
+    };
+    return caMap[String(caThi).trim()] || caThi;
+}
+
+function mergeExamsByClassAndTime(exams) {
+    const mergedMap = new Map();
+    
+    exams.forEach(exam => {
+        const key = `${exam.maMH}|${exam.maLop}|${exam.ngayThi}|${exam.caThi}`;
+        
+        if (!mergedMap.has(key)) {
+            mergedMap.set(key, {
+                ...exam,
+                phongThiList: [exam.phongThi],
+                giangVienList: exam.giangVien ? [exam.giangVien] : []
+            });
+        } else {
+            const merged = mergedMap.get(key);
+            if (!merged.phongThiList.includes(exam.phongThi)) {
+                merged.phongThiList.push(exam.phongThi);
+            }
+            if (exam.giangVien && !merged.giangVienList.includes(exam.giangVien)) {
+                merged.giangVienList.push(exam.giangVien);
+            }
+        }
+    });
+    
+    return Array.from(mergedMap.values());
+}
+
+function populateExamDateFilter() {
+    if (!elements.examFilterDate) return;
+    
+    const dates = new Set();
+    appState.examSchedule.forEach(exam => {
+        if (exam.ngayThi) {
+            dates.add(formatExamDate(exam.ngayThi));
+        }
+    });
+    
+    elements.examFilterDate.innerHTML = '<option value="">Tất cả ngày</option>';
+    Array.from(dates).sort().forEach(date => {
+        const option = document.createElement('option');
+        option.value = date;
+        option.textContent = date;
+        elements.examFilterDate.appendChild(option);
+    });
+}
+
+function renderExamSchedule() {
+    if (!elements.examScheduleList || !elements.examScheduleEmpty) return;
+    
+    if (!appState.examSchedule || appState.examSchedule.length === 0) {
+        elements.examScheduleList.classList.add('hidden');
+        elements.examScheduleEmpty.classList.remove('hidden');
+        if (elements.examFilterDate) elements.examFilterDate.style.display = 'none';
+        return;
+    }
+    
+    elements.examScheduleEmpty.classList.add('hidden');
+    elements.examScheduleList.classList.remove('hidden');
+    if (elements.examFilterDate) elements.examFilterDate.style.display = 'inline-block';
+    
+    let filtered = [...appState.examSchedule];
+    
+    if (elements.examFilterDate && elements.examFilterDate.value) {
+        filtered = filtered.filter(exam => formatExamDate(exam.ngayThi) === elements.examFilterDate.value);
+    }
+    
+    const sortedExams = filtered.sort((a, b) => {
+        const dateA = parseExamDate(a.ngayThi);
+        const dateB = parseExamDate(b.ngayThi);
+        if (!dateA || !dateB) return 0;
+        if (dateA.getTime() !== dateB.getTime()) {
+            return dateA - dateB;
+        }
+        return parseInt(a.caThi || 0) - parseInt(b.caThi || 0);
+    });
+    
+    const groupedByDate = {};
+    sortedExams.forEach(exam => {
+        const date = formatExamDate(exam.ngayThi);
+        if (!groupedByDate[date]) {
+            groupedByDate[date] = [];
+        }
+        groupedByDate[date].push(exam);
+    });
+    
+    let html = '';
+    Object.keys(groupedByDate).sort().forEach(date => {
+        const exams = groupedByDate[date];
+        const mergedExams = mergeExamsByClassAndTime(exams);
+        
+        html += `
+            <div class="exam-date-group">
+                <div class="exam-date-header">
+                    <h3>${date}</h3>
+                    <span class="exam-count">${mergedExams.length} môn thi</span>
+                </div>
+                <div class="exam-items">
+        `;
+        
+        mergedExams.forEach(exam => {
+            const caTime = getCaThiTime(exam.caThi);
+            const phongThiDisplay = exam.phongThiList.length > 1 
+                ? exam.phongThiList.join(', ') 
+                : exam.phongThiList[0];
+            const giangVienDisplay = exam.giangVienList.length > 0 
+                ? exam.giangVienList.join(', ') 
+                : 'N/A';
+            
+            html += `
+                <div class="exam-item">
+                    <div class="exam-item-header">
+                        <div class="exam-subject">
+                            <span class="exam-code">${exam.maMH}</span>
+                            <span class="exam-name">${exam.tenMH}</span>
+                        </div>
+                        <div class="exam-time">
+                            <span class="exam-ca">Ca ${exam.caThi}</span>
+                            <span class="exam-time-value">${caTime}</span>
+                        </div>
+                    </div>
+                    <div class="exam-item-details">
+                        <div class="exam-detail-item">
+                            <i class="fas fa-map-marker-alt"></i>
+                            <span>Phòng: ${phongThiDisplay}${exam.phongThiList.length > 1 ? ` (${exam.phongThiList.length} phòng)` : ''}</span>
+                        </div>
+                        <div class="exam-detail-item">
+                            <i class="fas fa-user"></i>
+                            <span>GV: ${giangVienDisplay}</span>
+                        </div>
+                        <div class="exam-detail-item">
+                            <i class="fas fa-users"></i>
+                            <span>Lớp: ${exam.maLop}</span>
+                        </div>
+                        <div class="exam-detail-item">
+                            <i class="fas fa-calendar-day"></i>
+                            <span>Thứ ${exam.thu}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    });
+    
+    elements.examScheduleList.innerHTML = html;
+}
+
+let examScheduleUIInitialized = false;
+
+async function initExamScheduleUI() {
+    if (!elements.importExamScheduleBtn || examScheduleUIInitialized) return;
+    examScheduleUIInitialized = true;
+    
+    elements.importExamScheduleBtn.onclick = async () => {
+        try {
+            const res = await window.electronAPI.importExamScheduleFile();
+            if (res?.success && res.data) {
+                try {
+                    const exams = parseExamScheduleExcel(res.data);
+                    appState.examScheduleRaw = exams;
+                    
+                    const currentSemesterCourses = getCurrentSemesterCourses();
+                    const filtered = filterExamScheduleByCourses(exams, currentSemesterCourses);
+                    appState.examSchedule = filtered;
+                    
+                    await window.electronAPI.setSetting('examSchedule.raw', exams);
+                    await window.electronAPI.setSetting('examSchedule.filtered', filtered);
+                    
+                    populateExamDateFilter();
+                    renderExamSchedule();
+                    showNotification(`Đã import ${filtered.length} môn thi từ ${exams.length} môn trong file`, 'success');
+                } catch (parseError) {
+                    showNotification(`Lỗi parse file: ${parseError.message}`, 'error');
+                }
+            } else if (!res?.cancelled) {
+                showNotification(res?.error || 'Không thể đọc file Excel', 'error');
+            }
+        } catch (error) {
+            showNotification(`Lỗi: ${error.message}`, 'error');
+        }
+    };
+    
+    try {
+        const savedRaw = await window.electronAPI.getSetting('examSchedule.raw');
+        if (Array.isArray(savedRaw) && savedRaw.length > 0) {
+            appState.examScheduleRaw = savedRaw;
+            
+            if (appState.courses && appState.courses.length > 0) {
+                const currentSemesterCourses = getCurrentSemesterCourses();
+                const filtered = filterExamScheduleByCourses(savedRaw, currentSemesterCourses);
+                appState.examSchedule = filtered;
+                await window.electronAPI.setSetting('examSchedule.filtered', filtered);
+            } else {
+                const savedFiltered = await window.electronAPI.getSetting('examSchedule.filtered');
+                if (Array.isArray(savedFiltered) && savedFiltered.length > 0) {
+                    appState.examSchedule = savedFiltered;
+                }
+            }
+            
+            populateExamDateFilter();
+            renderExamSchedule();
+        }
+    } catch {}
+    
+    if (elements.examFilterDate) {
+        elements.examFilterDate.addEventListener('change', () => {
+            renderExamSchedule();
+        });
+    }
+}
+
 
 (function initButtonRipples(){
     document.addEventListener('click', (e) => {

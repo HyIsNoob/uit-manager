@@ -174,6 +174,13 @@
                             <span class="nav-text">Thời khóa biểu</span>
                         </div>
                         
+                        <div class="nav-item" data-section="exam-schedule">
+                            <div class="nav-icon">
+                                <i class="fas fa-calendar-alt"></i>
+                            </div>
+                            <span class="nav-text">Lịch thi</span>
+                        </div>
+                        
                         <div class="nav-item" data-section="tools">
                             <div class="nav-icon">
                                 <i class="fas fa-tools"></i>
@@ -412,6 +419,31 @@
                             <i class="fas fa-file-import"></i>
                             Import .ics
                         </button>
+                    </div>
+                </section>
+
+                <!-- Exam Schedule Section -->
+                <section id="exam-schedule-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Lịch thi</h2>
+                        <div class="header-actions">
+                            <select id="exam-filter-date" class="filter-select" style="min-width: 200px;">
+                                <option value="">Tất cả ngày</option>
+                            </select>
+                            <button id="import-exam-schedule-btn" class="btn btn-primary">
+                                <i class="fas fa-file-import"></i>
+                                Import file Excel
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="exam-schedule-content">
+                        <div id="exam-schedule-empty" class="empty-state">
+                            <i class="fas fa-calendar-times"></i>
+                            <h3>Chưa có lịch thi</h3>
+                            <p>Vui lòng import file Excel lịch thi để xem lịch thi của bạn.</p>
+                        </div>
+                        <div id="exam-schedule-list" class="exam-schedule-list hidden"></div>
                     </div>
                 </section>
 
