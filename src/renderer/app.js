@@ -1,0 +1,8626 @@
+function shouldStcRefreshNow(settings) {
+    const enabled = Boolean(settings?.stcAutoRefreshEnabled);
+    if (!enabled) return false;
+    const mins = Math.max(5, Math.min(180, Number(settings?.stcAutoRefreshMinutes) || 15));
+    const last = Number(settings?.stcLastRefreshAt) || 0;
+    return !last || (Date.now() - last) >= mins * 60 * 1000;
+}
+// Global state
+const appState = {
+    currentUser: null,
+    currentToken: null,
+    siteInfo: null,
+    baseUrl: 'https://courses.uit.edu.vn',
+    categories: [],
+    semesters: [],
+    courses: [],
+    assignments: [],
+    categoryMap: new Map(),
+    courseSemMap: new Map(),
+    coursesByCategory: new Map(),
+    lastCheckTime: null,
+    pollingInterval: null,
+    showGroupOnly: false,
+    userGroupAssignments: new Map(),
+    currentWeek: new Date(),
+    currentMonth: new Date(),
+    // New UI settings/state
+    sortOrder: 'closest', // 'closest' | 'farthest'
+    urgentDays: 3, // controls red threshold
+    pinnedAssignments: new Set(), // assignment IDs pinned by user
+    dashboardData: {
+        urgentAssignments: [],
+        upcomingAssignments: [],
+        completedAssignments: [],
+        completionRate: 0,
+        semesterProgress: 0
+    },
+    // In-memory assignments cache per course
+    assignmentsCache: {},
+    breadcrumb: [],
+    searchQuery: '',
+    currentCourse: null,
+    // Timetable
+    icsRaw: '',
+    timetableEvents: [], // normalized events {dow(1-5), startMin, endMin, title, location, start, end}
+    timetableWeekStart: null,
+    timetableInited: false,
+    courseColors: {}, // code -> {bg,border,accent}
+    customDeadlines: [], // manual deadlines
+    editingCustomDeadlineId: null,
+    cdSearchQuery: '',
+    cdSelectedTags: new Set(),
+    // Exam Schedule
+    examSchedule: [], // filtered exam schedule for enrolled courses
+    examScheduleRaw: [], // raw data from Excel
+    examScheduleFiltered: [], // currently displayed exams after filtering
+    stc: {
+        sid: '',
+        allData: null,
+        allTimestamp: null,
+        authState: null,
+    },
+    timetableSource: 'ics',
+    scheduleOverrides: [],
+};
+
+// DOM elements
+const elements = {
+    loadingScreen: document.getElementById('loading-screen'),
+    loginScreen: document.getElementById('login-screen'),
+    mainApp: document.getElementById('main-app'),
+    
+    // Login form elements
+    newUserForm: document.getElementById('new-user-form'),
+    existingUserForm: document.getElementById('existing-user-form'),
+    newStudentId: document.getElementById('new-student-id'),
+    newToken: document.getElementById('new-token'),
+    studentId: document.getElementById('student-id'),
+    registerBtn: document.getElementById('register-btn'),
+    loginBtn: document.getElementById('login-btn'),
+    switchToLogin: document.getElementById('switch-to-login'),
+    switchToRegister: document.getElementById('switch-to-register'),
+    removeAccountBtn: document.getElementById('remove-account-btn'),
+    
+    // Main app elements
+    userName: document.getElementById('user-name'),
+    logoutBtn: document.getElementById('logout-btn'),
+    navItems: document.querySelectorAll('.nav-item'),
+    contentSections: document.querySelectorAll('.content-section'),
+    
+    // Dashboard elements
+    refreshDataBtn: document.getElementById('refresh-data-btn'),
+    exportCalendarBtn: document.getElementById('export-calendar-btn'),
+    clockText: document.getElementById('clock-text'),
+    urgentAssignments: document.getElementById('urgent-assignments'),
+    upcomingAssignments: document.getElementById('upcoming-assignments'),
+    completedAssignments: document.getElementById('completed-assignments'),
+    completionRate: document.getElementById('completion-rate'),
+    completionProgress: document.getElementById('completion-progress'),
+    urgentToday: document.getElementById('urgent-today'),
+    upcomingWeek: document.getElementById('upcoming-week'),
+    // Month calendar
+    monthCalendar: document.getElementById('month-calendar'),
+    currentMonthLabel: document.getElementById('current-month'),
+    prevMonth: document.getElementById('prev-month'),
+    nextMonth: document.getElementById('next-month'),
+    semesterProgressFill: document.getElementById('semester-progress-fill'),
+    semesterProgressText: document.getElementById('semester-progress-text'),
+    semesterAssignments: document.getElementById('semester-assignments'),
+    semesterCourses: document.getElementById('semester-courses'),
+    semesterDaysLeft: document.getElementById('semester-days-left'),
+    // Quick actions removed
+    
+    // Assignment elements
+    semesterFilter: document.getElementById('semester-filter'),
+    courseFilter: document.getElementById('course-filter'),
+    statusFilter: document.getElementById('status-filter'),
+    assignmentsList: document.getElementById('assignments-list'),
+    toggleGroupBtn: document.getElementById('toggle-group-btn'),
+    sortOrder: document.getElementById('sort-order'),
+    assignmentsRefreshBtn: document.getElementById('assignments-refresh-btn'),
+    
+    // Course elements
+    coursesList: document.getElementById('courses-list'),
+    semesterFilterCourses: document.getElementById('semester-filter-courses'),
+    generalCoursesList: document.getElementById('general-courses-list'),
+    semesterCoursesList: document.getElementById('semester-courses-list'),
+    generalCount: document.getElementById('general-count'),
+    semesterCount: document.getElementById('semester-count'),
+    toggleGeneralCourses: document.getElementById('toggle-general-courses'),
+    
+    
+    // Settings elements
+    currentStudentId: document.getElementById('current-student-id'),
+    currentUsername: document.getElementById('current-username'),
+    changeAccountBtn: document.getElementById('change-account-btn'),
+    allowInsecureTLS: document.getElementById('allow-insecure-tls'),
+    baseUrlInput: document.getElementById('base-url-input'),
+    enableNotifications: document.getElementById('enable-notifications'),
+    pollingInterval: document.getElementById('polling-interval'),
+    urgentDaysThreshold: document.getElementById('urgent-days-threshold'),
+    autoStartWindows: document.getElementById('auto-start-windows'),
+    minimizeToTray: document.getElementById('minimize-to-tray'),
+    
+    // Smart Notification elements
+    enableToastNotifications: document.getElementById('enable-toast-notifications'),
+    enableInAppNotifications: document.getElementById('enable-in-app-notifications'),
+    enableNotificationSound: document.getElementById('enable-notification-sound'),
+    notificationCheckInterval: document.getElementById('notification-check-interval'),
+    notifyNewAssignments: document.getElementById('notify-new-assignments'),
+    notifyNewContent: document.getElementById('notify-new-content'),
+    notifyUpcomingDeadlines: document.getElementById('notify-upcoming-deadlines'),
+    ignoreOldDays: document.getElementById('ignore-old-days'),
+    testNotificationBtn: document.getElementById('test-notification-btn'),
+    clearNotificationHistoryBtn: document.getElementById('clear-notification-history-btn'),
+    
+    // Notification container
+    notificationContainer: document.getElementById('notification-container'),
+    
+    // Sidebar elements
+    sidebar: document.getElementById('sidebar'),
+    sidebarUserName: document.getElementById('sidebar-user-name'),
+    // Timetable UI
+    openTkbWeb: document.getElementById('open-tkb-web'),
+    importIcsBtn: document.getElementById('import-ics-btn'),
+    timetableSource: document.getElementById('timetable-source'),
+    ttPrevWeek: document.getElementById('tt-prev-week'),
+    ttNextWeek: document.getElementById('tt-next-week'),
+    ttWeekLabel: document.getElementById('tt-week-label'),
+    timetableGrid: document.getElementById('timetable-grid'),
+    timetableGuide: document.getElementById('timetable-guide'),
+    
+    // Course Details Modal elements
+    // Assignment Details Page
+    assignmentDetailsSection: document.getElementById('assignment-details-section'),
+    assignmentDetailsTitle: document.getElementById('assignment-details-title'),
+    assignmentDetailsContent: document.getElementById('assignment-details-content'),
+    openAssignmentBtn: document.getElementById('open-assignment-btn'),
+    
+    // Course Details Page
+    courseDetailsSection: document.getElementById('course-details-section'),
+    courseDetailsTitle: document.getElementById('course-details-title'),
+    courseDetailsContent: document.getElementById('course-details-content'),
+    openCourseBtn: document.getElementById('open-course-btn'),
+    // Course meta elements
+    courseInstructor: document.getElementById('course-instructor'),
+    courseSemester: document.getElementById('course-semester')
+    ,courseColorModal: document.getElementById('course-color-modal')
+    ,courseColorInput: document.getElementById('course-color-input')
+    ,courseColorPreview: document.getElementById('color-preview')
+    ,courseColorMeta: document.getElementById('course-color-meta')
+    ,saveCourseColor: document.getElementById('save-course-color')
+    ,resetCourseColor: document.getElementById('reset-course-color')
+    ,closeCourseColor: document.getElementById('close-course-color')
+    // Exam Schedule elements
+    ,importExamScheduleBtn: document.getElementById('import-exam-schedule-btn')
+    ,examScheduleList: document.getElementById('exam-schedule-list')
+    ,examScheduleEmpty: document.getElementById('exam-schedule-empty')
+    ,examFilterDate: document.getElementById('exam-filter-date')
+
+    // STC UI - updates
+    ,stcRefreshUpdates: document.getElementById('stc-refresh-updates')
+    ,stcBannerUpdates: document.getElementById('stc-banner-updates')
+    ,stcOpenProfileUpdates: document.getElementById('stc-open-profile-updates')
+    ,scheduleUpdatesSearch: document.getElementById('schedule-updates-search')
+    ,scheduleUpdatesCourse: document.getElementById('schedule-updates-course')
+    ,scheduleUpdatesType: document.getElementById('schedule-updates-type')
+    ,scheduleUpdatesSort: document.getElementById('schedule-updates-sort')
+    ,scheduleUpdatesRange: document.getElementById('schedule-updates-range')
+    ,scheduleUpdatesList: document.getElementById('schedule-updates-list')
+
+    // STC UI - grades
+    ,stcRefreshGrades: document.getElementById('stc-refresh-grades')
+    ,stcBannerGrades: document.getElementById('stc-banner-grades')
+    ,stcOpenProfileGrades: document.getElementById('stc-open-profile-grades')
+    ,gradesSearch: document.getElementById('grades-search')
+    ,gradesSemester: document.getElementById('grades-semester')
+    ,gradesSort: document.getElementById('grades-sort')
+    ,gradesSummary: document.getElementById('grades-summary')
+    ,gradesContent: document.getElementById('grades-content')
+
+    // STC Profile modal
+    ,stcProfileModal: document.getElementById('stc-profile-modal')
+    ,stcProfileClose: document.getElementById('stc-profile-close')
+    ,stcProfileName: document.getElementById('stc-profile-name')
+    ,stcProfileStudentId: document.getElementById('stc-profile-studentid')
+    ,stcProfileSid: document.getElementById('stc-profile-sid')
+    ,stcProfilePass: document.getElementById('stc-profile-pass')
+    ,stcProfileRemember: document.getElementById('stc-profile-remember')
+    ,stcProfileLogin: document.getElementById('stc-profile-login')
+    ,stcProfileClear: document.getElementById('stc-profile-clear')
+    ,stcProfileMeta: document.getElementById('stc-profile-meta')
+
+    // STC settings
+    ,openStcProfileSettings: document.getElementById('open-stc-profile-settings')
+    ,stcAutoRefreshEnabled: document.getElementById('stc-auto-refresh-enabled')
+    ,stcAutoRefreshMinutes: document.getElementById('stc-auto-refresh-minutes')
+};
+// THEME
+async function applyThemeFromSettings() {
+    try {
+        const settings = await window.electronAPI.getSettings();
+        const theme = settings?.theme || 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+        // theme button removed from header; theme lives in settings
+        // Apply TLS toggle UI
+        if (elements.allowInsecureTLS) {
+            elements.allowInsecureTLS.checked = Boolean(settings?.allowInsecureTLS);
+        }
+        if (elements.baseUrlInput) {
+            elements.baseUrlInput.value = settings?.baseUrl || 'https://courses.uit.edu.vn';
+        }
+        if (elements.enableNotifications) {
+            elements.enableNotifications.checked = settings?.enableNotifications !== false;
+        }
+        if (elements.pollingInterval) {
+            elements.pollingInterval.value = settings?.pollingInterval || 5;
+        }
+        if (elements.minimizeToTray) {
+            elements.minimizeToTray.checked = settings?.minimizeToTray !== false; // default true
+        }
+        // Load course colors if stored
+        if (settings?.courseColors && typeof settings.courseColors === 'object') {
+            appState.courseColors = settings.courseColors;
+            window.__courseColors = settings.courseColors; // for timetable renderer
+        }
+    } catch (e) {
+        console.error('Failed to apply theme', e);
+    }
+}
+
+async function toggleThemeInSettings() {
+    const current = document.documentElement.getAttribute('data-theme') || 'light';
+    const next = current === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    await window.electronAPI.setSetting('theme', next);
+}
+
+// Utility functions
+function updateSidebarUserInfo() {
+    if (elements.sidebarUserName && appState.currentUser) {
+        elements.sidebarUserName.textContent = appState.currentUser.fullname || 'Sinh viên';
+    }
+}
+
+// Realtime clock
+function startRealtimeClock() {
+    if (!elements.clockText) return;
+    const update = () => {
+        try {
+            const now = new Date();
+            const dayNames = ['CN','Th 2','Th 3','Th 4','Th 5','Th 6','Th 7'];
+            const day = dayNames[now.getDay()];
+            const dd = String(now.getDate()).padStart(2,'0');
+            const mm = String(now.getMonth()+1).padStart(2,'0');
+            const yyyy = now.getFullYear();
+            const hh = String(now.getHours()).padStart(2,'0');
+            const mi = String(now.getMinutes()).padStart(2,'0');
+            // Simplified format: HH:MM  •  Th X, dd/mm/yyyy (no seconds)
+            elements.clockText.textContent = `${hh}:${mi}  •  ${day}, ${dd}/${mm}/${yyyy}`;
+        } catch {}
+    };
+    update();
+    // Update every 30s is enough (no seconds displayed)
+    setInterval(update, 30000);
+}
+
+function showNotification(message, type = 'info', duration = 3000) {
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    
+    const icon = {
+        success: 'fas fa-check-circle',
+        error: 'fas fa-exclamation-circle',
+        warning: 'fas fa-exclamation-triangle',
+        info: 'fas fa-info-circle'
+    }[type];
+    
+    const notificationId = Date.now().toString();
+    
+    notification.innerHTML = `
+        <i class="${icon}"></i>
+        <span>${message}</span>
+    `;
+    
+    notification.id = `notification-${notificationId}`;
+    
+    // Add click event to dismiss notification
+    notification.addEventListener('click', () => {
+        dismissNotification(notificationId);
+    });
+    
+    elements.notificationContainer.appendChild(notification);
+    
+    // Auto dismiss after duration
+    const autoDismissTimer = setTimeout(() => {
+        dismissNotification(notificationId);
+    }, duration);
+    
+    // Store timer for manual dismissal
+    notification.autoDismissTimer = autoDismissTimer;
+
+    // Return the id so callers can programmatically dismiss if needed
+    return notificationId;
+}
+
+// Small utility: debounce and textarea autosize
+function debounce(fn, delay = 500) {
+    let t;
+    return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(() => fn(...args), delay);
+    };
+}
+
+function initAutosizeTextarea(ta) {
+    if (!ta) return;
+    const resize = () => {
+        ta.style.height = 'auto';
+        ta.style.height = (ta.scrollHeight + 2) + 'px';
+    };
+    ta.addEventListener('input', resize);
+    // initial
+    setTimeout(resize, 0);
+}
+
+function setNotesStatus(elId, text, type = 'muted') {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.textContent = text || '';
+    // If this is a new badge element, map classes accordingly
+    if (el.classList.contains('file-badge')) {
+        el.className = `file-badge ${type}`;
+    } else {
+        el.className = `notes-status ${type}`;
+    }
+}
+
+function dismissNotification(notificationId) {
+    const notification = document.getElementById(`notification-${notificationId}`);
+    if (notification) {
+        // Clear auto dismiss timer
+        if (notification.autoDismissTimer) {
+            clearTimeout(notification.autoDismissTimer);
+        }
+        
+        // Add dismiss animation
+        notification.style.animation = 'slideOutRight 0.3s ease-in forwards';
+        notification.style.opacity = '0';
+        notification.style.transform = 'translateX(100%)';
+        
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 300);
+    }
+}
+
+function formatDate(timestamp) {
+    if (!timestamp) return '-';
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleString('vi-VN');
+}
+
+function formatDateShort(timestamp) {
+    if (!timestamp) return '-';
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleDateString('vi-VN');
+}
+
+// Helpers for assignment status used in details rendering
+function getAssignmentStatus(assignment) {
+    if (!assignment) return 'pending';
+    if (assignment.userMarkedGroupSubmitted) return 'submitted';
+    if (assignment.isGroup) return 'group';
+    if (assignment.isLate) return 'late';
+    if (assignment.status === 'submitted' || assignment.isSubmitted) return 'submitted';
+    return 'pending';
+}
+
+function getAssignmentStatusText(assignment) {
+    const status = getAssignmentStatus(assignment);
+    switch (status) {
+        case 'group': return 'Bài tập nhóm';
+        case 'late': return 'Nộp muộn';
+        case 'submitted': return 'Đã nộp';
+        default: return 'Chưa nộp';
+    }
+}
+
+function isSemesterName(name) {
+    if (!name) return false;
+    const s = name.toLowerCase();
+    return /(học\s*kỳ|hoc\s*ky|semester|hk\s?\d|hk\s?\d{4}|\d{4}-\d{4})/.test(s);
+}
+
+function parseSemesterName(name) {
+    const result = { sem: null, y1: null, y2: null };
+    if (!name) return result;
+    
+    const s = String(name);
+    const semMatch = s.match(/(?:h[ọo]c\s*k[ỳy]|hk|semester)\s*(\d+)/i);
+    if (semMatch) result.sem = Number(semMatch[1]);
+    
+    const yearMatch = s.match(/(\d{4})\s*[-/–]\s*(\d{4})/);
+    if (yearMatch) {
+        result.y1 = Number(yearMatch[1]);
+        result.y2 = Number(yearMatch[2]);
+    }
+    
+    return result;
+}
+
+// API functions
+async function callAPI(method, ...args) {
+    try {
+        const result = await window.electronAPI[method](...args);
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+        return result.data;
+    } catch (error) {
+        console.error(`API call failed: ${method}`, error);
+        throw error;
+    }
+}
+
+// Authentication functions
+async function registerAccount(studentId, token) {
+    try {
+        elements.registerBtn.disabled = true;
+        elements.registerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang xử lý...';
+        
+        const result = await window.electronAPI.saveAccount(studentId, token);
+        
+        if (result.success) {
+            showNotification('Đăng ký tài khoản thành công!', 'success');
+            await loadSavedAccounts();
+            switchToLoginForm();
+            elements.newStudentId.value = '';
+            elements.newToken.value = '';
+        } else {
+            showNotification(`Lỗi đăng ký: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showNotification(`Lỗi đăng ký: ${error.message}`, 'error');
+    } finally {
+        elements.registerBtn.disabled = false;
+        elements.registerBtn.innerHTML = '<i class="fas fa-user-plus"></i> Đăng ký tài khoản';
+    }
+}
+
+async function loginWithStudentId(studentId) {
+    try {
+        elements.loginBtn.disabled = true;
+        elements.loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang đăng nhập...';
+        
+        const result = await window.electronAPI.loginWithStudentId(studentId);
+        
+        if (result.success) {
+            appState.currentUser = result.userInfo;
+            appState.currentToken = result.token;
+            appState.currentStudentId = studentId;
+            
+            showNotification(`Chào mừng ${result.userInfo.fullname}!`, 'success');
+            await initializeApp();
+        } else {
+            showNotification(`Lỗi đăng nhập: ${result.error}`, 'error');
+            return;
+        }
+    } catch (error) {
+        showNotification(`Lỗi đăng nhập: ${error.message}`, 'error');
+    } finally {
+        elements.loginBtn.disabled = false;
+        elements.loginBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Đăng nhập';
+    }
+}
+
+async function loadSavedAccounts() {
+    try {
+        const accounts = await window.electronAPI.getSavedAccounts();
+        elements.studentId.innerHTML = '<option value="">Chọn mã số sinh viên</option>';
+        
+        accounts.forEach(account => {
+            const option = document.createElement('option');
+            option.value = account.studentId;
+            option.textContent = `${account.studentId} - ${account.fullname}`;
+            elements.studentId.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Failed to load saved accounts:', error);
+    }
+}
+
+async function removeAccount() {
+    const studentId = elements.studentId.value;
+    if (!studentId) {
+        showNotification('Vui lòng chọn tài khoản cần xóa', 'warning');
+        return;
+    }
+    
+    if (confirm(`Bạn có chắc chắn muốn xóa tài khoản ${studentId}?`)) {
+        try {
+            await window.electronAPI.removeAccount(studentId);
+            showNotification('Xóa tài khoản thành công', 'success');
+            await loadSavedAccounts();
+        } catch (error) {
+            showNotification(`Lỗi xóa tài khoản: ${error.message}`, 'error');
+        }
+    }
+}
+
+// Data loading functions
+async function loadSiteInfo() {
+    try {
+        appState.siteInfo = await callAPI('getSiteInfo', appState.currentToken);
+        return appState.siteInfo;
+    } catch (error) {
+        throw new Error(`Không thể tải thông tin site: ${error.message}`);
+    }
+}
+
+async function loadUserCourses() {
+    try {
+        if (!appState.siteInfo?.userid) {
+            throw new Error('Thiếu thông tin user ID');
+        }
+        
+        appState.courses = await callAPI('getUserCourses', appState.currentToken, appState.siteInfo.userid);
+        
+        console.log(`Loaded ${appState.courses.length} courses:`, appState.courses.map(c => ({ id: c.id, name: c.fullname, category: c.category })));
+        
+        // Group courses by category
+        appState.coursesByCategory.clear();
+        appState.courses.forEach(course => {
+            const catId = course.category || course.categoryid || 0;
+            if (!appState.coursesByCategory.has(catId)) {
+                appState.coursesByCategory.set(catId, []);
+            }
+            appState.coursesByCategory.get(catId).push(course);
+        });
+        
+        // Re-filter exam schedule if raw data exists (only current semester courses)
+        if (appState.examScheduleRaw && appState.examScheduleRaw.length > 0) {
+            const currentSemesterCourses = getCurrentSemesterCourses();
+            const filtered = filterExamScheduleByCourses(appState.examScheduleRaw, currentSemesterCourses);
+            appState.examSchedule = filtered;
+            await window.electronAPI.setSetting('examSchedule.filtered', filtered);
+            renderExamSchedule();
+        }
+        
+        return appState.courses;
+    } catch (error) {
+        throw new Error(`Không thể tải danh sách khóa học: ${error.message}`);
+    }
+}
+
+async function fetchCategoriesByIds(ids) {
+    if (!ids.length) return [];
+    
+    const missing = ids.filter(id => !appState.categoryMap.has(id));
+    if (!missing.length) return [];
+    
+    try {
+        const categories = await callAPI('getCategoriesByIds', appState.currentToken, missing);
+        const arr = Array.isArray(categories) ? categories : [];
+        arr.forEach(cat => appState.categoryMap.set(cat.id, cat));
+        return arr;
+    } catch (error) {
+        console.error('Failed to fetch categories:', error);
+        return [];
+    }
+}
+
+function getCategory(id) {
+    return appState.categoryMap.get(id);
+}
+
+function findSemesterForCategory(catId) {
+    let current = getCategory(catId);
+    let steps = 0;
+    
+    while (current && steps < 10) {
+        if (isSemesterName(current.name)) {
+            return current.id;
+        }
+        const parentId = Number(current.parent || 0);
+        if (!parentId) break;
+        current = getCategory(parentId);
+        steps++;
+    }
+    
+    return null;
+}
+
+async function loadCategoriesForCourses() {
+    const catIds = Array.from(new Set(
+        appState.courses.map(c => c.category || c.categoryid).filter(Boolean)
+    ));
+    
+    if (catIds.length === 0) {
+        appState.categories = [];
+        appState.semesters = [];
+        return;
+    }
+    
+    // Fetch course categories and their parents
+    await fetchCategoriesByIds(catIds);
+    let frontier = catIds.slice();
+    
+    for (let depth = 0; depth < 6; depth++) {
+        const parents = Array.from(new Set(
+            frontier.map(id => (getCategory(id) || {}).parent)
+                .filter(pid => pid && !appState.categoryMap.has(pid))
+        ));
+        if (!parents.length) break;
+        await fetchCategoriesByIds(parents);
+        frontier = parents;
+    }
+    
+    // Determine semester category for each course
+    appState.courseSemMap.clear();
+    const semesterIdsSet = new Set();
+    
+    for (const course of appState.courses) {
+        const cid = Number(course.category || course.categoryid);
+        let semId = cid ? findSemesterForCategory(cid) : null;
+        
+        // Fallback: check direct parent
+        if (!semId && cid) {
+            const cat = getCategory(cid);
+            const parentId = cat ? Number(cat.parent || 0) : 0;
+            if (parentId) {
+                const parent = getCategory(parentId);
+                if (parent && isSemesterName(parent.name)) {
+                    semId = parent.id;
+                }
+            }
+        }
+        
+        if (semId) {
+            appState.courseSemMap.set(course.id, semId);
+            semesterIdsSet.add(semId);
+        }
+    }
+    
+    const semesterIds = Array.from(semesterIdsSet);
+    await fetchCategoriesByIds(semesterIds);
+    
+    appState.semesters = semesterIds.map(id => getCategory(id)).filter(Boolean);
+    
+    appState.semesters.sort((a, b) => {
+        const pa = parseSemesterName(a.name);
+        const pb = parseSemesterName(b.name);
+        const aParsed = (pa.y1 && pa.y2) ? 1 : 0;
+        const bParsed = (pb.y1 && pb.y2) ? 1 : 0;
+        if (aParsed !== bParsed) return bParsed - aParsed;
+        if (aParsed) {
+            if (pa.y1 !== pb.y1) return pb.y1 - pa.y1;
+            if (pa.y2 !== pb.y2) return pb.y2 - pa.y2;
+            const sa = pa.sem ?? 0;
+            const sb = pb.sem ?? 0;
+            if (sa !== sb) return sb - sa;
+        }
+        return (a.name || '').localeCompare(b.name || '');
+    });
+}
+
+async function loadAssignmentsForCourse(courseId, opts = {}) {
+    const force = Boolean(opts && opts.force);
+    try {
+        console.log(`Loading assignments for course ${courseId}`);
+        const courseKey = String(courseId);
+        const memCache = appState.assignmentsCache[courseKey];
+        if (!force && memCache && Array.isArray(memCache.data) && (Date.now() - memCache.timestamp) < 15 * 60 * 1000) {
+            console.log(`Using in-memory cache for course ${courseId}: ${memCache.data.length} items`);
+            return memCache.data;
+        }
+
+        if (!force) {
+            try {
+                const cachedResp = await window.electronAPI.getAssignmentsCache(appState.siteInfo?.userid, [Number(courseId)]);
+                if (cachedResp && cachedResp.success) {
+                    const entry = cachedResp.data && cachedResp.data[courseKey];
+                    if (entry && Array.isArray(entry.data) && (Date.now() - entry.timestamp) < 60 * 60 * 1000) {
+                        console.log(`Using persistent cache for course ${courseId}: ${entry.data.length} items`);
+                        appState.assignmentsCache[courseKey] = { data: entry.data, timestamp: entry.timestamp };
+                        return entry.data;
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to read assignments persistent cache:', e.message);
+            }
+        }
+
+        // 3) Fallback to API
+        const data = await callAPI('getAssignments', appState.currentToken, [courseId]);
+        const course = (data.courses || []).find(c => c.id === Number(courseId));
+        const assignments = course ? (course.assignments || []) : [];
+        console.log(`Found ${assignments.length} assignments for course ${courseId}:`, assignments.map(a => ({ id: a.id, name: a.name })));
+        
+        // Get course contents to map cmid for assignments
+        let courseContents = null;
+        try {
+            courseContents = await callAPI('getCourseContents', appState.currentToken, courseId);
+            console.log('Course contents loaded for cmid mapping');
+        } catch (error) {
+            console.error('Error loading course contents for cmid mapping:', error);
+        }
+        
+        // Create cmid mapping from course contents
+        const cmidMap = new Map();
+        if (courseContents && Array.isArray(courseContents)) {
+            courseContents.forEach(section => {
+                if (section.modules && Array.isArray(section.modules)) {
+                    section.modules.forEach(module => {
+                        if (module.modname === 'assign' && module.instance) {
+                            cmidMap.set(module.instance, {
+                                cmid: module.id,
+                                url: module.url
+                            });
+                        }
+                    });
+                }
+            });
+        }
+        
+    // Load submission status and add cmid/url for each assignment
+        const assignmentsWithStatus = await Promise.all(assignments.map(async (assignment) => {
+            try {
+                const status = await loadSubmissionStatus(assignment.id);
+                
+                // Add cmid and url from mapping
+                const cmidInfo = cmidMap.get(assignment.id);
+                const assignmentUrl = assignment.cmid ? 
+                    `${appState.baseUrl}/mod/assign/view.php?id=${assignment.cmid}` :
+                    (cmidInfo?.url || (cmidInfo?.cmid ? `${appState.baseUrl}/mod/assign/view.php?id=${cmidInfo.cmid}` : null));
+                
+                if (status && status.lastattempt) {
+                    const la = status.lastattempt;
+                    const sub = la.submission || {};
+                    const isLate = Boolean(assignment.duedate && sub.status === 'submitted' && sub.timemodified > assignment.duedate);
+                    
+                    return {
+                        ...assignment,
+                        cmid: assignment.cmid || cmidInfo?.cmid,
+                        url: assignmentUrl,
+                        submissionStatus: status,
+                        isSubmitted: sub.status === 'submitted',
+                        isLate: isLate,
+                        submittedTime: sub.timemodified || null,
+                        timestarted: sub.timestarted || null,
+                        timecreated: sub.timecreated || null
+                    };
+                } else {
+                    return {
+                        ...assignment,
+                        cmid: assignment.cmid || cmidInfo?.cmid,
+                        url: assignmentUrl,
+                        submissionStatus: status,
+                        isSubmitted: false,
+                        isLate: false,
+                        submittedTime: null,
+                        timestarted: null,
+                        timecreated: null
+                    };
+                }
+            } catch (error) {
+                console.error('Error loading assignment status:', error);
+                const cmidInfo = cmidMap.get(assignment.id);
+                const assignmentUrl = assignment.cmid ? 
+                    `${appState.baseUrl}/mod/assign/view.php?id=${assignment.cmid}` :
+                    (cmidInfo?.url || (cmidInfo?.cmid ? `${appState.baseUrl}/mod/assign/view.php?id=${cmidInfo.cmid}` : null));
+                
+                return {
+                    ...assignment,
+                    cmid: assignment.cmid || cmidInfo?.cmid,
+                    url: assignmentUrl,
+                    submissionStatus: null,
+                    isSubmitted: false,
+                    isLate: false,
+                    submittedTime: null,
+                    timestarted: null,
+                    timecreated: null
+                };
+            }
+        }));
+        // Store enriched results to caches for future faster loads
+        const enriched = assignmentsWithStatus;
+        appState.assignmentsCache[courseKey] = { data: enriched, timestamp: Date.now() };
+        window.electronAPI.setAssignmentsCache(appState.siteInfo?.userid, Number(courseId), enriched).catch(() => {});
+
+        return enriched;
+    } catch (error) {
+        console.error('Failed to load assignments:', error);
+        return [];
+    }
+}
+
+async function loadSubmissionStatus(assignId) {
+    try {
+        return await callAPI('getAssignmentStatus', appState.currentToken, assignId, appState.siteInfo.userid);
+    } catch (error) {
+        console.error('Failed to load submission status:', error);
+        return null;
+    }
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+    const results = new Array(items.length);
+    let i = 0;
+    
+    async function worker() {
+        while (i < items.length) {
+            const idx = i++;
+            try {
+                results[idx] = await mapper(items[idx], idx);
+            } catch (e) {
+                results[idx] = null;
+            }
+        }
+    }
+    
+    const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+    await Promise.all(workers);
+    return results;
+}
+
+// Smart Dashboard Functions
+function calculateSmartStats() {
+    const now = Date.now();
+    const urgentDays = Number(appState.urgentDays) || 3;
+    const toHours = (ms) => ms / 36e5;
+
+    const isSubmitted = (a) => {
+        if (!a) return false;
+        const sub1 = a.submission?.status;
+        const sub2 = a.submissionStatus?.lastattempt?.submission?.status;
+        return sub1 === 'submitted' || sub2 === 'submitted';
+    };
+
+    const urgent = appState.assignments.filter(a => {
+        if (!a?.duedate) return false;
+        if (isSubmitted(a)) return false;
+        if (a.isGroup) return false;
+        const diffH = toHours((a.duedate * 1000) - now);
+        return diffH >= 0 && diffH <= urgentDays * 24;
+    });
+
+    const upcoming = appState.assignments.filter(a => {
+        if (!a?.duedate) return false;
+        if (isSubmitted(a)) return false;
+        if (a.isGroup) return false;
+        const diffH = toHours((a.duedate * 1000) - now);
+        return diffH > urgentDays * 24 && diffH <= 7 * 24;
+    });
+
+    const completed = appState.assignments.filter(a => !a.isGroup && isSubmitted(a));
+    
+    // Calculate completion rate (exclude group assignments)
+    const total = appState.assignments.filter(a => !a.isGroup).length;
+    const completionRate = total > 0 ? Math.round((completed.length / total) * 100) : 0;
+    
+    // Update dashboard data
+    appState.dashboardData = {
+        urgentAssignments: urgent,
+        upcomingAssignments: upcoming,
+        completedAssignments: completed,
+        completionRate: completionRate,
+        semesterProgress: calculateSemesterProgress()
+    };
+    
+    return appState.dashboardData;
+}
+
+function calculateSemesterProgress() {
+    if (appState.semesters.length === 0) return 0;
+    
+    const currentSemester = appState.semesters[0]; // Latest semester
+    const semesterCourses = appState.courses.filter(c => 
+        appState.courseSemMap.get(c.id) === currentSemester.id
+    );
+    
+    if (semesterCourses.length === 0) return 0;
+    
+    // Simple progress calculation based on completed assignments
+    const semesterAssignments = appState.assignments.filter(a => {
+        const course = appState.courses.find(c => c.id === a.course);
+        return course && appState.courseSemMap.get(course.id) === currentSemester.id;
+    });
+    
+    const filtered = semesterAssignments.filter(a => !a.isGroup);
+    const completed = filtered.filter(a => (a.submission?.status === 'submitted') || (a.submissionStatus?.lastattempt?.submission?.status === 'submitted')).length;
+    return filtered.length > 0 ? Math.round((completed / filtered.length) * 100) : 0;
+}
+
+function updateSmartDashboard() {
+    const stats = calculateSmartStats();
+    
+    // Update stat cards
+    elements.urgentAssignments.textContent = stats.urgentAssignments.length;
+    elements.upcomingAssignments.textContent = stats.upcomingAssignments.length;
+    elements.completedAssignments.textContent = stats.completedAssignments.length;
+    elements.completionRate.textContent = `${stats.completionRate}%`;
+    
+    // Update progress bar
+    elements.completionProgress.style.width = `${stats.completionRate}%`;
+    
+    // Update focus content
+    updateTodayFocus(stats);
+    
+    // Update month calendar
+    updateMonthCalendar();
+    
+    // Update semester progress
+    updateSemesterProgress();
+
+    const ctx = document.getElementById('dashboard-context-line');
+    if (ctx) {
+        const sem = appState.semesters && appState.semesters.length ? appState.semesters[0] : null;
+        const n = Array.isArray(appState.assignments) ? appState.assignments.length : 0;
+        ctx.textContent = sem
+            ? `Học kỳ mốc: ${sem.name} · ${n} bài tập đã tải`
+            : (n ? `${n} bài tập đã tải` : 'Chưa có dữ liệu bài tập');
+    }
+    const gpaEl = document.getElementById('dashboard-stc-gpa');
+    if (gpaEl) {
+        const scores = Array.isArray(appState.stc?.allData?.scores) ? appState.stc.allData.scores : [];
+        const snap = computeStcGradeSummaryChung(scores);
+        gpaEl.textContent = snap
+            ? `STC · TB tích lũy ~ ${snap.avgTichLuy !== null && snap.avgTichLuy !== undefined ? Number(snap.avgTichLuy).toFixed(2) : '—'} (${snap.creditsTichLuy} TC)`
+            : '';
+    }
+}
+
+function updateTodayFocus(stats) {
+    // Urgent today
+    if (stats.urgentAssignments.length > 0) {
+        const urgentList = stats.urgentAssignments.slice(0, 3).map(a => a.name).join(', ');
+        elements.urgentToday.textContent = urgentList + (stats.urgentAssignments.length > 3 ? '...' : '');
+    } else {
+        elements.urgentToday.textContent = 'Không có bài tập khẩn cấp';
+    }
+    
+    // Upcoming week
+    if (stats.upcomingAssignments.length > 0) {
+        const upcomingList = stats.upcomingAssignments.slice(0, 3).map(a => a.name).join(', ');
+        elements.upcomingWeek.textContent = upcomingList + (stats.upcomingAssignments.length > 3 ? '...' : '');
+    } else {
+        elements.upcomingWeek.textContent = 'Không có bài tập sắp đến hạn';
+    }
+}
+
+function updateMonthCalendar() {
+    if (!elements.monthCalendar || !elements.currentMonthLabel) return;
+    const year = appState.currentMonth.getFullYear();
+    const month = appState.currentMonth.getMonth();
+    const firstDay = new Date(year, month, 1);
+    // Align Monday as 0..Sunday as 6 consistently; avoid TZ drift by using noon
+    firstDay.setHours(12,0,0,0);
+    const startDayOfWeek = (firstDay.getDay() + 6) % 7; // Mon=0..Sun=6
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const prevMonthDays = new Date(year, month, 0).getDate();
+    const leadingDays = startDayOfWeek;
+    const weekdays = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+    let html = `<div class="weekday-header">${weekdays.map(d => `<div class=\"weekday\">${d}</div>`).join('')}</div>`;
+    html += '<div class="month-grid">';
+    const todayStr = new Date().toDateString();
+    // Count how many assignments fall within the visible year-month
+    const itemsInThisMonth = (appState.assignments || []).filter(a => {
+        if (!a?.duedate) return false;
+        const due = new Date(a.duedate * 1000);
+        return due.getFullYear() === year && due.getMonth() === month;
+    }).length;
+
+    const getDotsForDate = (dateObj) => {
+        const items = appState.assignments.filter(a => {
+            if (!a.duedate) return false;
+            const due = new Date(a.duedate * 1000);
+            return due.getFullYear() === dateObj.getFullYear() &&
+                   due.getMonth() === dateObj.getMonth() &&
+                   due.getDate() === dateObj.getDate();
+        });
+        const now = new Date();
+        const toHours = (ms) => ms / 36e5;
+        let bgClass = '';
+        const urgentDays = Number(appState.urgentDays) || 3;
+        // Determine highest severity among non-submitted, non-group items
+        for (const a of items) {
+            if (a.isGroup) continue;
+            if (a.isSubmitted || a.status === 'submitted') continue;
+            const dueTime = new Date(a.duedate * 1000);
+            const diffH = toHours(dueTime - now);
+            if (diffH < 0) {
+                // Already past due: keep uncolored here; dots will still indicate
+                continue;
+            }
+            if (diffH <= urgentDays * 24) {
+                bgClass = 'deadline-urgent';
+                break;
+            } else if (diffH <= 7 * 24) {
+                // mark as near if not already urgent
+                bgClass = bgClass || 'deadline-near';
+            } else if (diffH > 7 * 24) {
+                // mark as far if nothing else
+                bgClass = bgClass || 'deadline-far';
+            }
+        }
+        const hasUrgent = items.some(a => {
+            if (a.isGroup || (a.isSubmitted || a.status === 'submitted') || !a.duedate) return false;
+            const diffH = toHours(new Date(a.duedate * 1000) - now);
+            return diffH >= 0 && diffH <= urgentDays * 24;
+        });
+        const hasUpcoming = items.some(a => {
+            if (a.isGroup || (a.isSubmitted || a.status === 'submitted') || !a.duedate) return false;
+            const diffH = toHours(new Date(a.duedate * 1000) - now);
+            return diffH > urgentDays * 24 && diffH <= 7 * 24;
+        });
+        const hasSubmitted = items.some(a => a.isSubmitted === true || a.status === 'submitted');
+        const hasGroup = items.some(a => a.isGroup);
+        const dots = [];
+        if (hasUrgent) dots.push('urgent');
+        if (hasUpcoming) dots.push('upcoming');
+        if (hasSubmitted) dots.push('submitted');
+        if (hasGroup) dots.push('group');
+        if (items.length > 0 && dots.length === 0) {
+            // Fallback: show 'upcoming' dot to indicate presence even if beyond 7 days
+            dots.push('upcoming');
+        }
+        return { count: items.length, dots: dots.slice(0, 3), bgClass };
+    };
+
+    for (let i = leadingDays; i > 0; i--) {
+        const d = new Date(year, month - 1, prevMonthDays - i + 1);
+        d.setHours(12,0,0,0);
+        const { dots, count, bgClass } = getDotsForDate(d);
+        html += `
+        <div class="month-day other-month ${bgClass}" data-date="${d.toISOString().split('T')[0]}">
+            <div class="day-header">
+                <span>${d.getDate()}</span>
+                <div class="dots">${dots.map(t => `<span class=\"dot ${t}\"></span>`).join('')}</div>
+            </div>
+            ${count > 0 ? `<div class="day-assignments">${count} việc</div>` : ''}
+        </div>`;
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const d = new Date(year, month, day);
+        d.setHours(12,0,0,0);
+        const isToday = d.toDateString() === todayStr;
+        const { dots, count, bgClass } = getDotsForDate(d);
+        html += `
+        <div class="month-day ${isToday ? 'today' : ''} ${bgClass}" data-date="${d.toISOString().split('T')[0]}">
+            <div class="day-header">
+                <span>${day}</span>
+                <div class="dots">${dots.map(t => `<span class=\"dot ${t}\"></span>`).join('')}</div>
+            </div>
+            ${count > 0 ? `<div class="day-assignments">${count} việc</div>` : ''}
+        </div>`;
+    }
+
+    const totalCellsSoFar = leadingDays + daysInMonth;
+    const trailing = (7 - (totalCellsSoFar % 7)) % 7;
+    for (let i = 1; i <= trailing; i++) {
+        const d = new Date(year, month + 1, i);
+        d.setHours(12,0,0,0);
+        const { dots, count, bgClass } = getDotsForDate(d);
+        html += `
+        <div class="month-day other-month ${bgClass}" data-date="${d.toISOString().split('T')[0]}">
+            <div class="day-header">
+                <span>${d.getDate()}</span>
+                <div class="dots">${dots.map(t => `<span class=\"dot ${t}\"></span>`).join('')}</div>
+            </div>
+            ${count > 0 ? `<div class="day-assignments">${count} việc</div>` : ''}
+        </div>`;
+    }
+
+    html += '</div>';
+    elements.monthCalendar.innerHTML = html;
+    const monthName = appState.currentMonth.toLocaleString('vi-VN', { month: 'long', year: 'numeric' });
+    elements.currentMonthLabel.textContent = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+    if (itemsInThisMonth === 0) {
+        const note = document.createElement('div');
+        note.className = 'calendar-empty-note';
+        note.textContent = 'Không có bài tập nào trong tháng này';
+        elements.monthCalendar.appendChild(note);
+    }
+
+    // Click behavior: open assignment details for the selected day
+    elements.monthCalendar.querySelectorAll('.month-day').forEach(cell => {
+        cell.addEventListener('click', () => {
+            const iso = cell.getAttribute('data-date');
+            if (!iso) return;
+            const d = new Date(iso + 'T00:00:00');
+            const items = (appState.assignments || []).filter(a => {
+                if (!a?.duedate) return false;
+                const due = new Date(a.duedate * 1000);
+                return due.getFullYear() === d.getFullYear() &&
+                       due.getMonth() === d.getMonth() &&
+                       due.getDate() === d.getDate();
+            });
+            if (items.length === 0) return;
+            if (items.length === 1) {
+                openAssignmentDetails(String(items[0].id));
+            } else {
+                openCalendarDayPicker(iso, items);
+            }
+        });
+    });
+}
+
+// Backward compatibility shim: keep function name if referenced elsewhere
+function updateWeekCalendar() {
+    updateMonthCalendar();
+}
+
+function updateSemesterProgress() {
+    if (appState.semesters.length === 0) return;
+    
+    const currentSemester = appState.semesters[0];
+    const semesterCourses = appState.courses.filter(c => 
+        appState.courseSemMap.get(c.id) === currentSemester.id
+    );
+    
+    const semesterAssignments = appState.assignments.filter(a => {
+        const course = appState.courses.find(c => c.id === a.course);
+        return course && appState.courseSemMap.get(course.id) === currentSemester.id;
+    });
+    
+    // Calculate days left in semester (rough estimate)
+    const semesterEnd = new Date();
+    semesterEnd.setMonth(semesterEnd.getMonth() + 3); // Assume 3 months per semester
+    const daysLeft = Math.ceil((semesterEnd - new Date()) / (1000 * 60 * 60 * 24));
+    
+    // Update progress
+    const progress = calculateSemesterProgress();
+    elements.semesterProgressFill.style.width = `${progress}%`;
+    elements.semesterProgressText.textContent = `${progress}%`;
+    
+    // Update stats
+    elements.semesterAssignments.textContent = semesterAssignments.length;
+    elements.semesterCourses.textContent = semesterCourses.length;
+    elements.semesterDaysLeft.textContent = Math.max(0, daysLeft);
+}
+
+// Legacy function for backward compatibility
+function updateDashboard() {
+    updateSmartDashboard();
+}
+
+function updateSemesterFilter() {
+    // Sort semesters: newest first (by parsed year/sem)
+    const sorted = [...appState.semesters].sort((a, b) => {
+        const pa = parseSemesterName(a.name);
+        const pb = parseSemesterName(b.name);
+        const key = (p) => [p.y1 || 0, p.y2 || 0, p.sem || 0];
+        const [a1,a2,a3] = key(pa);
+        const [b1,b2,b3] = key(pb);
+        if (a1 !== b1) return b1 - a1;
+        if (a2 !== b2) return b2 - a2;
+        return (b3 - a3);
+    });
+
+    elements.semesterFilter.innerHTML = '<option value="">Tất cả học kỳ</option>';
+    sorted.forEach(semester => {
+        const option = document.createElement('option');
+        option.value = semester.id;
+        option.textContent = semester.name;
+        elements.semesterFilter.appendChild(option);
+    });
+    
+    // Populate semester filter for courses
+    if (elements.semesterFilterCourses) {
+        elements.semesterFilterCourses.innerHTML = '<option value="">Tất cả học kỳ</option>';
+        sorted.forEach(semester => {
+            const option = document.createElement('option');
+            option.value = semester.id;
+            option.textContent = semester.name;
+            elements.semesterFilterCourses.appendChild(option);
+        });
+    }
+
+    // Keep previous behavior (no auto filtering on init beyond populating lists)
+    if (sorted.length > 0) {
+        elements.semesterFilter.value = String(sorted[0].id);
+    }
+    // Only refresh pickers/lists as before
+    handleSemesterChangeForCourses();
+}
+
+function updateCourseFilter() {
+    elements.courseFilter.innerHTML = '<option value="">Tất cả môn học</option>';
+    const selectedSemId = Number(elements.semesterFilter.value) || null;
+    const filtered = selectedSemId ? appState.courses.filter(c => appState.courseSemMap.get(c.id) === selectedSemId) : appState.courses;
+    filtered.forEach(course => {
+        const option = document.createElement('option');
+        option.value = course.id;
+        option.textContent = course.fullname;
+        elements.courseFilter.appendChild(option);
+    });
+}
+
+function handleSemesterChangeForCourses() {
+    updateCourseFilter();
+    // if a specific course previously selected no longer belongs to semester, reset
+    const selCourseId = Number(elements.courseFilter.value) || null;
+    if (selCourseId && appState.courseSemMap.get(selCourseId) !== Number(elements.semesterFilter.value)) {
+        elements.courseFilter.value = '';
+    }
+}
+
+// Helper function to detect group assignments
+function isGroupAssignment(assignment) {
+    try {
+        // Prefer explicit team submission flags/configs
+        if (assignment.teamsubmission === 1 || assignment.team_submission === 1) return true;
+        if (Array.isArray(assignment.configs)) {
+            const cfg = assignment.configs.find(c => /team.?submission/i.test(c.name || ''));
+            if (cfg && String(cfg.value) === '1') return true;
+        }
+        if (assignment.intro) {
+            const intro = String(assignment.intro).toLowerCase();
+            if (/(\bnhóm\b|\bgroup\b|\bteam\b|tập thể)/i.test(intro)) return true;
+        }
+        // Fallback: heuristic on name
+        const groupKeywords = ['nhóm', 'group', 'team', 'tập thể'];
+        const name = (assignment.name || '').toLowerCase();
+        return groupKeywords.some(keyword => name.includes(keyword));
+    } catch {
+        return false;
+    }
+}
+
+async function updateAssignmentsList(opts = {}) {
+    const force = Boolean(opts && opts.force);
+    const semesterId = elements.semesterFilter.value;
+    const courseId = elements.courseFilter.value;
+    const status = elements.statusFilter.value;
+    
+    elements.assignmentsList.innerHTML = `
+        <div class="loading-placeholder">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Đang tải danh sách bài tập...</p>
+        </div>
+    `;
+    
+    try {
+        let assignments = [];
+        
+        if (courseId) {
+            assignments = await loadAssignmentsForCourse(courseId, { force });
+        } else if (semesterId) {
+            const semesterCourses = appState.courses.filter(c => 
+                appState.courseSemMap.get(c.id) === Number(semesterId)
+            );
+            
+            for (const course of semesterCourses) {
+                const courseAssignments = await loadAssignmentsForCourse(course.id, { force });
+                assignments.push(...courseAssignments);
+            }
+        } else {
+            for (const course of appState.courses) {
+                const courseAssignments = await loadAssignmentsForCourse(course.id, { force });
+                assignments.push(...courseAssignments);
+            }
+        }
+        
+        const userGroupMap = await window.electronAPI.getGroupAssignments();
+        const userGroupSubmittedMap = await window.electronAPI.getGroupSubmittedAssignments();
+
+        // Load submission statuses
+        const statuses = await mapWithConcurrency(assignments, 5, (assignment) => 
+            loadSubmissionStatus(assignment.id)
+        );
+        
+        // Process assignments with group detection
+        let processedAssignments = assignments.map((assignment, idx) => {
+            const userMark = userGroupMap[String(assignment.id)];
+            const isGroup = userMark !== undefined ? Boolean(userMark) : isGroupAssignment(assignment);
+            const userMarkedGroupSubmitted = Boolean(userGroupSubmittedMap[String(assignment.id)]);
+            const submissionStatus = statuses[idx]?.lastattempt?.submission?.status || 'draft';
+            const submission = statuses[idx]?.lastattempt?.submission || null;
+            
+            const isLate = !isGroup && submissionStatus === 'submitted' && 
+                          assignment.duedate && 
+                          submission?.timemodified > assignment.duedate;
+            
+            return {
+                ...assignment,
+                isGroup,
+                userMarkedGroupSubmitted,
+                status: submissionStatus,
+                submission,
+                isLate
+            };
+        });
+        
+    // Apply filters
+    let filteredAssignments = processedAssignments;
+        
+        // Group filter
+        if (appState.showGroupOnly) {
+            filteredAssignments = filteredAssignments.filter(a => a.isGroup);
+        }
+        
+        // Status filter
+        if (status) {
+            filteredAssignments = filteredAssignments.filter(assignment => {
+                if (status === 'late') {
+                    return assignment.isLate;
+                } else if (status === 'group') {
+                    return assignment.isGroup;
+                }
+                if (status === 'submitted') {
+                    return assignment.status === 'submitted' || assignment.userMarkedGroupSubmitted;
+                }
+                return assignment.status === status;
+            });
+        }
+        
+        // Sort by due date or creation date with pinned on top, expired assignments at bottom
+        const nowTs = Date.now();
+        const isPinned = (a) => appState.pinnedAssignments.has(String(a.id));
+        const isExpired = (a) => a.duedate && (a.duedate * 1000) < nowTs;
+        const isSubmitted = (a) => a.status === 'submitted' || a.userMarkedGroupSubmitted;
+        
+        filteredAssignments.sort((a, b) => {
+            // Pinned first
+            const pa = isPinned(a) ? 1 : 0;
+            const pb = isPinned(b) ? 1 : 0;
+            if (pa !== pb) return pb - pa; // pinned (1) before not (0)
+            
+            // Expired and submitted assignments go to bottom (only for due date sorting)
+            if (appState.sortOrder === 'closest' || appState.sortOrder === 'farthest') {
+                const aExpired = isExpired(a) && isSubmitted(a);
+                const bExpired = isExpired(b) && isSubmitted(b);
+                if (aExpired !== bExpired) return aExpired - bExpired; // expired (true=1) after not expired (false=0)
+            }
+            
+            // Sort by different criteria based on sortOrder
+            if (appState.sortOrder === 'newest' || appState.sortOrder === 'oldest') {
+                // Sort by creation date (timecreated)
+                const aCreated = a.timecreated ? (a.timecreated * 1000) : 0;
+                const bCreated = b.timecreated ? (b.timecreated * 1000) : 0;
+                const sortDir = (appState.sortOrder === 'newest') ? -1 : 1; // newest = descending, oldest = ascending
+                return (aCreated - bCreated) * sortDir;
+            } else {
+                // Sort by due date (existing logic)
+                const sortDir = (appState.sortOrder === 'farthest') ? 1 : -1; // closest => ascending time to due
+                const dueMs = (a) => (a.duedate ? (a.duedate * 1000) : Number.MAX_SAFE_INTEGER);
+                const timeTo = (a) => (dueMs(a) - nowTs);
+                const ta = timeTo(a);
+                const tb = timeTo(b);
+                if (isNaN(ta) && isNaN(tb)) return 0;
+                if (isNaN(ta)) return 1;
+                if (isNaN(tb)) return -1;
+                return (ta - tb) * (sortDir * -1);
+            }
+        });
+
+        // Merge processed items back into appState.assignments to keep dashboard/calendar in sync
+        try {
+            const existing = new Map(appState.assignments.map(a => [a.id, a]));
+            processedAssignments.forEach(a => {
+                existing.set(a.id, { ...(existing.get(a.id) || {}), ...a });
+            });
+            appState.assignments = Array.from(existing.values());
+            // Refresh dashboard + calendar to reflect the latest data source
+            updateSmartDashboard();
+            updateMonthCalendar();
+        } catch (e) { console.warn('Failed to merge assignments for dashboard sync:', e?.message || e); }
+
+        // Render assignments
+        if (filteredAssignments.length === 0) {
+            elements.assignmentsList.innerHTML = '<p>Không có bài tập nào</p>';
+            return;
+        }
+        
+        elements.assignmentsList.innerHTML = filteredAssignments.map(assignment => {
+            let statusClass = 'pending';
+            let statusText = 'Chưa nộp';
+            let statusIcon = 'fas fa-clock';
+            
+            const moodleSubmitted = assignment.status === 'submitted';
+            if (assignment.userMarkedGroupSubmitted || moodleSubmitted) {
+                if (assignment.isLate && !assignment.userMarkedGroupSubmitted) {
+                    statusClass = 'late';
+                    statusText = 'Nộp muộn';
+                    statusIcon = 'fas fa-exclamation-triangle';
+                } else {
+                    statusClass = 'submitted';
+                    statusText = assignment.userMarkedGroupSubmitted && !moodleSubmitted ? 'Đã nộp (nhóm, tự xác nhận)' : 'Đã nộp';
+                    statusIcon = 'fas fa-check-circle';
+                }
+            } else if (assignment.isGroup) {
+                statusClass = 'group';
+                statusText = 'Bài tập nhóm';
+                statusIcon = 'fas fa-users';
+            }
+            
+            const course = appState.courses.find(c => (c.id === assignment.course) || (c.id === assignment.courseid));
+            const courseName = course ? (course.fullname || course.displayname || course.shortname) : 'Môn học';
+
+            // Urgency background: if pending and within urgentDays -> add 'urgent' class
+            let urgencyClass = '';
+            if (statusClass === 'pending' && assignment.duedate) {
+                const msLeft = (assignment.duedate * 1000) - Date.now();
+                const daysLeft = msLeft / (1000 * 60 * 60 * 24);
+                const urgentDays = Number(appState.urgentDays) || 3;
+                if (daysLeft <= urgentDays && daysLeft >= 0) urgencyClass = 'urgent';
+            }
+
+            const pinned = appState.pinnedAssignments.has(String(assignment.id));
+            return `
+                <div class="assignment-card ${statusClass} ${urgencyClass}" data-assign-id="${assignment.id}">
+                    <div class="assignment-header">
+                        <div class="assignment-title">
+                            ${assignment.isGroup ? '<i class="fas fa-users" style="margin-right: 8px; color: var(--group);"></i>' : ''}
+                            ${assignment.name}
+                            <span class="assignment-course-pill" title="${courseName}"><i class="fas fa-book"></i> ${courseName}</span>
+                        </div>
+                        <div class="assignment-header-right">
+                            <label class="pin-label" title="Ưu tiên hiển thị">
+                                <input type="checkbox" class="pin-assignment-checkbox" ${pinned ? 'checked' : ''} />
+                                <i class="fas fa-thumbtack"></i>
+                            </label>
+                            ${!(moodleSubmitted || assignment.userMarkedGroupSubmitted) ? `
+                            <div class="countdown-chip" id="countdown-${assignment.id}">
+                                <i class="fas fa-clock"></i>
+                                <span class="countdown-text">-- ngày -- giờ -- phút</span>
+                            </div>
+                            ` : ''}
+                            <div class="assignment-status status-${statusClass}">
+                                <i class="${statusIcon}"></i>
+                                ${statusText}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="assignment-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Ngày giao</div>
+                            <div class="meta-value">${formatDate(assignment.allowsubmissionsfromdate)}</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Hạn chót</div>
+                            <div class="meta-value">${formatDate(assignment.duedate)}</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Loại</div>
+                            <div class="meta-value">
+                                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                    <input type="checkbox" class="mark-group-checkbox" ${assignment.isGroup ? 'checked' : ''} />
+                                    Bài tập nhóm
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="assignment-actions">
+                        ${assignment.isGroup && !moodleSubmitted ? `<button type="button" class="btn btn-outline btn-small group-submitted-toggle" data-assign-id="${assignment.id}" data-marked="${assignment.userMarkedGroupSubmitted ? '1' : '0'}">${assignment.userMarkedGroupSubmitted ? 'Bỏ đánh dấu đã nộp (nhóm)' : 'Đánh dấu đã nộp (nhóm)'}</button>` : ''}
+                        <button class="btn btn-outline btn-small" onclick="openAssignmentDetails('${assignment.id}')">
+                            <i class="fas fa-cog"></i>
+                            Chi tiết
+                        </button>
+                        <button class="btn btn-outline btn-small" onclick="openAssignment('${assignment.id}')">
+                            <i class="fas fa-external-link-alt"></i>
+                            Mở bài tập
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        Array.from(document.querySelectorAll('.assignment-card .group-submitted-toggle')).forEach((btn) => {
+            btn.addEventListener('click', async (e) => {
+                const id = Number(btn.getAttribute('data-assign-id'));
+                const marked = btn.getAttribute('data-marked') === '1';
+                if (!Number.isFinite(id)) return;
+                await window.electronAPI.setGroupSubmittedAssignment(id, !marked);
+                showNotification(!marked ? 'Đã đánh dấu bài nhóm đã nộp' : 'Đã bỏ đánh dấu', 'success');
+                updateAssignmentsList();
+            });
+        });
+        // Attach listeners for group checkboxes
+        Array.from(document.querySelectorAll('.assignment-card .mark-group-checkbox')).forEach((cb) => {
+            cb.addEventListener('change', async (e) => {
+                const card = e.target.closest('.assignment-card');
+                const assignId = card ? Number(card.getAttribute('data-assign-id')) : null;
+                if (!assignId) return;
+                await window.electronAPI.setGroupAssignment(assignId, e.target.checked);
+                showNotification(e.target.checked ? 'Đã đánh dấu bài tập nhóm' : 'Đã bỏ đánh dấu bài tập nhóm', 'success');
+                updateAssignmentsList();
+            });
+        });
+        // Attach listeners for pin checkboxes
+        Array.from(document.querySelectorAll('.assignment-card .pin-assignment-checkbox')).forEach((cb) => {
+            cb.addEventListener('change', (e) => {
+                const card = e.target.closest('.assignment-card');
+                const assignId = card ? String(card.getAttribute('data-assign-id')) : null;
+                if (!assignId) return;
+                if (e.target.checked) {
+                    appState.pinnedAssignments.add(assignId);
+                } else {
+                    appState.pinnedAssignments.delete(assignId);
+                }
+                // Persist
+                try {
+                    localStorage.setItem('pinnedAssignments', JSON.stringify(Array.from(appState.pinnedAssignments)));
+                } catch {}
+                showNotification('Đã áp dụng', 'success');
+                updateAssignmentsList();
+            });
+        });
+        
+        // Initialize countdown timers for unsubmitted assignments
+        filteredAssignments.forEach(assignment => {
+            if (!(assignment.status === 'submitted' || assignment.userMarkedGroupSubmitted)) {
+                initializeAssignmentCountdown(assignment.id, assignment.duedate);
+            }
+        });
+        
+    } catch (error) {
+        elements.assignmentsList.innerHTML = `<p>Lỗi tải bài tập: ${error.message}</p>`;
+    }
+}
+
+function updateCoursesList() {
+    if (!appState.courses || appState.courses.length === 0) {
+        elements.generalCoursesList.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-book"></i>
+                <p>Chưa có khóa học nào</p>
+            </div>
+        `;
+        elements.semesterCoursesList.innerHTML = '';
+        return;
+    }
+
+    // Separate general and semester courses
+    const generalCourses = appState.courses.filter(course => {
+        const semester = appState.courseSemMap.get(course.id) ? 
+            getCategory(appState.courseSemMap.get(course.id)) : null;
+        return !semester;
+    });
+    
+    const semesterCourses = appState.courses.filter(course => {
+        const semester = appState.courseSemMap.get(course.id) ? 
+            getCategory(appState.courseSemMap.get(course.id)) : null;
+        return semester;
+    });
+
+    // Update counts
+    elements.generalCount.textContent = generalCourses.length;
+    elements.semesterCount.textContent = semesterCourses.length;
+
+    // Render general courses
+    if (generalCourses.length > 0) {
+        elements.generalCoursesList.innerHTML = generalCourses.map(course => 
+            createCourseCard(course)
+        ).join('');
+    } else {
+        elements.generalCoursesList.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-globe"></i>
+                <p>Chưa có khóa học chung nào</p>
+            </div>
+        `;
+    }
+
+    // Apply visibility toggle for General Courses section if control exists
+    const generalSection = document.getElementById('general-courses');
+    if (generalSection && elements.toggleGeneralCourses) {
+        generalSection.style.display = elements.toggleGeneralCourses.checked ? '' : 'none';
+    }
+
+    // Render semester courses
+    if (semesterCourses.length > 0) {
+        elements.semesterCoursesList.innerHTML = semesterCourses.map(course => 
+            createCourseCard(course)
+        ).join('');
+    } else {
+        elements.semesterCoursesList.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-calendar-alt"></i>
+                <p>Chưa có khóa học theo kỳ nào</p>
+            </div>
+        `;
+    }
+}
+
+// ================= Custom Manual Deadlines ================= //
+async function loadCustomDeadlines() {
+    try {
+        const res = await window.electronAPI.getCustomDeadlines();
+        appState.customDeadlines = Array.isArray(res?.data) ? res.data : res; // fallback if direct data
+        renderCustomDeadlines();
+    } catch (e) {
+        console.error('Load custom deadlines failed', e);
+        // Fallback: set empty array if API fails
+        appState.customDeadlines = [];
+        renderCustomDeadlines();
+    }
+}
+
+function renderCustomDeadlines() {
+    const container = document.getElementById('custom-deadlines-list');
+    if (!container) {
+        return;
+    }
+    const filterSelect = document.getElementById('cd-filter-status');
+    const filterVal = filterSelect ? filterSelect.value : '';
+    const searchInput = document.getElementById('cd-search');
+    if (searchInput && appState.cdSearchQuery === '') {
+        // ensure value sync if changed elsewhere
+        // no-op for now
+    }
+    let list = appState.customDeadlines.slice();
+    const nowSecF = Math.floor(Date.now()/1000);
+    if (filterVal === 'active') list = list.filter(i => !i.completed);
+    else if (filterVal === 'completed') list = list.filter(i => i.completed);
+    else if (filterVal === 'overdue') list = list.filter(i => !i.completed && i.dueDate < nowSecF);
+
+    // Text search (title, description, tags, course name)
+    const q = appState.cdSearchQuery.trim().toLowerCase();
+    if (q) {
+        list = list.filter(item => {
+            const course = item.courseId ? appState.courses.find(c=> c.id == item.courseId) : null;
+            const courseName = course ? (course.fullname || course.shortname) : '';
+            const tags = Array.isArray(item.tags)? item.tags.join(' ') : '';
+            return (
+                (item.title||'').toLowerCase().includes(q) ||
+                (item.description||'').toLowerCase().includes(q) ||
+                courseName.toLowerCase().includes(q) ||
+                tags.toLowerCase().includes(q)
+            );
+        });
+    }
+
+    // Sort the list
+    const sortSelect = document.getElementById('cd-sort-order');
+    const sortVal = sortSelect ? sortSelect.value : 'closest';
+    if (sortVal === 'closest') {
+        list.sort((a, b) => (a.dueDate || 0) - (b.dueDate || 0));
+    } else if (sortVal === 'farthest') {
+        list.sort((a, b) => (b.dueDate || 0) - (a.dueDate || 0));
+    } else if (sortVal === 'title') {
+        list.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    } else if (sortVal === 'created') {
+        list.sort((a, b) => (b.id || '').localeCompare(a.id || ''));
+    }
+
+    // Tag filter (AND semantics across selected tags)
+    if (appState.cdSelectedTags.size > 0) {
+        list = list.filter(item => {
+            const tags = new Set(Array.isArray(item.tags)? item.tags.map(t=> t.toLowerCase()): []);
+            for (const t of appState.cdSelectedTags) {
+                if (!tags.has(t)) return false;
+            }
+            return true;
+        });
+    }
+    
+    if (list.length === 0) {
+        container.classList.add('empty');
+        container.innerHTML = '<p class="empty-text">Chưa có deadline thủ công nào.</p>';
+        renderCustomDeadlineTagFilters();
+        return;
+    }
+    container.classList.remove('empty');
+    const nowSec = Math.floor(Date.now()/1000);
+    const urgentDays = Number(appState.urgentDays)||3;
+    container.classList.add('list-enter');
+    container.innerHTML = list.map(item => {
+        const dueClass = !item.completed ? (item.dueDate < nowSec ? 'cd-overdue' : ((item.dueDate - nowSec) <= urgentDays*86400 ? 'cd-soon' : '')) : '';
+        const dueStr = item.dueDate ? new Date(item.dueDate*1000).toLocaleString('vi-VN') : '-';
+        const course = item.courseId ? appState.courses.find(c=> c.id == item.courseId) : null;
+        const courseName = course ? (course.fullname || course.shortname) : null;
+        const tagBadges = (Array.isArray(item.tags)? item.tags: []).map(t=> `<span class=\"cd-badge tag\">#${escapeHtml(shorten(t,16))}</span>`).join('');
+        const reminderBadge = item.reminderMinutes ? `<span class=\"cd-badge remind\" title=\"Nhắc trước ${item.reminderMinutes} phút\"><i class=\"fas fa-bell\"></i> -${item.reminderMinutes}’</span>` : '';
+        const styleBorder = item.color ? `style=\"border-left:6px solid ${item.color};\"` : '';
+        
+        // Calculate countdown
+        const diffMs = item.dueDate ? (item.dueDate * 1000) - Date.now() : 0;
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+        
+        return `
+        <div class="custom-deadline-card ${item.completed ? 'completed' : ''}" data-cd-id="${item.id}" ${styleBorder}>
+            <div class="custom-deadline-header">
+                <div class="custom-deadline-title">
+                    <span class="cd-status-dot ${dueClass}"></span>
+                    <i class="fas fa-bell"></i> <span class="cd-title-text">${escapeHtml(item.title)}</span>
+                </div>
+                <div class="custom-deadline-badges">
+                    ${courseName ? `<span class="cd-badge course" title="${escapeHtml(courseName)}"><i class="fas fa-book"></i> ${escapeHtml(shorten(courseName,32))}</span>` : ''}
+                    ${item.completed ? '<span class="cd-badge completed"><i class="fas fa-check"></i> Hoàn thành</span>' : ''}
+                    ${reminderBadge}
+                    ${tagBadges}
+                </div>
+            </div>
+            ${item.description ? `<div class="custom-deadline-desc">${escapeHtml(item.description)}</div>` : ''}
+            <div class="custom-deadline-footer">
+                <div class="cd-due ${dueClass}">
+                    <i class="fas fa-hourglass-half"></i> ${dueStr}
+                    <span class="cd-countdown ${diffMs < 0 ? 'overdue' : (diffDays <= 1 ? 'soon' : '')}">${diffMs < 0 ? 'Đã quá hạn' : (diffDays <= 1 ? (diffHours < 1 ? `${Math.ceil(diffMs/(1000*60))} phút` : `${diffHours} giờ`) : `${diffDays} ngày`)}</span>
+                </div>
+                <div class="cd-actions">
+                    <label class="cd-complete-toggle">
+                        <input type="checkbox" class="cd-complete-checkbox" ${item.completed ? 'checked' : ''} /> Hoàn thành
+                    </label>
+                    <button class="btn btn-outline btn-small cd-edit" title="Sửa"><i class="fas fa-edit"></i></button>
+                    <button class="btn btn-danger btn-small cd-delete" title="Xóa"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Stagger mount animation
+    const cards = Array.from(container.querySelectorAll('.custom-deadline-card'));
+    cards.forEach((el, idx) => {
+        setTimeout(() => { el.classList.add('mounted'); }, Math.min(40*idx, 320));
+    });
+
+    renderCustomDeadlineTagFilters();
+
+    // add listeners
+    container.querySelectorAll('.cd-complete-checkbox').forEach(cb => {
+        cb.addEventListener('change', async (e) => {
+            const card = e.target.closest('.custom-deadline-card');
+            const id = card?.getAttribute('data-cd-id');
+            if (!id) return;
+            try {
+                await window.electronAPI.toggleCompleteCustomDeadline(id, e.target.checked);
+                showNotification('Đã cập nhật trạng thái', 'success');
+                loadCustomDeadlines();
+            } catch (err) { showNotification('Lỗi cập nhật', 'error'); }
+        });
+    });
+    container.querySelectorAll('.cd-delete').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const card = e.target.closest('.custom-deadline-card');
+            const id = card?.getAttribute('data-cd-id');
+            if (!id) return;
+            
+            // Show custom delete confirmation modal
+            showDeleteConfirmation(id);
+        });
+    });
+    container.querySelectorAll('.cd-edit').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const card = e.target.closest('.custom-deadline-card');
+            const id = card?.getAttribute('data-cd-id');
+            const item = appState.customDeadlines.find(d=> d.id === id);
+            if (!item) return;
+            openCustomDeadlineModal(item);
+        });
+    });
+}
+
+function renderCustomDeadlineTagFilters() {
+    const tagContainer = document.getElementById('cd-tag-filters');
+    if (!tagContainer) return;
+    const allTagsMap = new Map(); // tag -> count
+    appState.customDeadlines.forEach(cd => {
+        (Array.isArray(cd.tags)? cd.tags: []).forEach(t => {
+            const key = String(t||'').trim();
+            if (!key) return;
+            allTagsMap.set(key, (allTagsMap.get(key)||0)+1);
+        });
+    });
+    if (allTagsMap.size === 0) { tagContainer.innerHTML = ''; return; }
+    const sorted = Array.from(allTagsMap.entries()).sort((a,b)=> a[0].localeCompare(b[0], 'vi')); 
+    tagContainer.innerHTML = sorted.map(([tag,count]) => {
+        const active = appState.cdSelectedTags.has(tag.toLowerCase());
+        return `<div class="cd-tag-chip ${active? 'active':''}" data-tag="${escapeHtml(tag)}"><span class="t">#${escapeHtml(shorten(tag,18))}</span><span class="count">${count}</span></div>`;
+    }).join('');
+    tagContainer.querySelectorAll('.cd-tag-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            const t = chip.getAttribute('data-tag');
+            if (!t) return;
+            const low = t.toLowerCase();
+            if (appState.cdSelectedTags.has(low)) appState.cdSelectedTags.delete(low); else appState.cdSelectedTags.add(low);
+            renderCustomDeadlines();
+        });
+    });
+}
+
+// listeners for search + status filter initialization (safe to call once after DOM ready)
+document.addEventListener('DOMContentLoaded', () => {
+    const searchEl = document.getElementById('cd-search');
+    if (searchEl) {
+        searchEl.addEventListener('input', (e)=> {
+            appState.cdSearchQuery = e.target.value;
+            renderCustomDeadlines();
+        });
+    }
+    const statusSel = document.getElementById('cd-filter-status');
+    if (statusSel) {
+        statusSel.addEventListener('change', ()=> renderCustomDeadlines());
+    }
+    const sortSel = document.getElementById('cd-sort-order');
+    if (sortSel) {
+        sortSel.addEventListener('change', ()=> renderCustomDeadlines());
+    }
+});
+
+function escapeHtml(str) {
+    return String(str||'').replace(/[&<>"]|'/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+}
+
+// Show delete confirmation modal
+function showDeleteConfirmation(deadlineId) {
+    const modal = document.getElementById('delete-confirmation-modal');
+    if (!modal) return;
+    
+    // Store deadline ID for later use
+    modal.dataset.deadlineId = deadlineId;
+    
+    // Show modal and trigger entrance animation
+    modal.classList.remove('hidden');
+    modal.classList.add('showing');
+    document.body.classList.add('no-scroll');
+}
+
+function shorten(str, len) { str = String(str||''); return str.length>len? str.slice(0,len-1)+'…': str; }
+
+function openCustomDeadlineModal(editItem) {
+    appState.editingCustomDeadlineId = editItem ? editItem.id : null;
+    const modal = document.getElementById('custom-deadline-modal');
+    const titleEl = document.getElementById('cd-title');
+    const dateEl = document.getElementById('cd-date');
+    const timeEl = document.getElementById('cd-time');
+    const descEl = document.getElementById('cd-desc');
+    const courseEl = document.getElementById('cd-course-inline');
+    const completedEl = null; // trạng thái đã bỏ khỏi UI
+    const modalTitle = document.getElementById('custom-deadline-modal-title');
+    const colorEl = document.getElementById('cd-color');
+    const tagsEl = document.getElementById('cd-tags');
+    const reminderEl = document.getElementById('cd-reminder');
+    const typeRadios = document.querySelectorAll('input[name="deadline-type"]');
+    if (!modal || !courseEl) return;
+    populateDeadlineCourseOptions();
+    titleEl.value = editItem ? editItem.title : '';
+    descEl.value = editItem ? (editItem.description||'') : '';
+    courseEl.value = editItem && editItem.courseId ? String(editItem.courseId) : '';
+    if (colorEl) colorEl.value = editItem && editItem.color ? editItem.color : '#06b6d4';
+    if (tagsEl) tagsEl.value = editItem && Array.isArray(editItem.tags) ? editItem.tags.join(', ') : '';
+    if (reminderEl) reminderEl.value = editItem && editItem.reminderMinutes ? String(editItem.reminderMinutes) : '';
+    // Set deadline type
+    const deadlineType = editItem && editItem.type ? editItem.type : 'assignment';
+    typeRadios.forEach(radio => {
+        radio.checked = radio.value === deadlineType;
+    });
+    if (editItem && editItem.dueDate) {
+        const dt = new Date(editItem.dueDate*1000);
+        dateEl.value = dt.toISOString().slice(0,10);
+        timeEl.value = dt.toISOString().slice(11,16);
+    } else {
+        dateEl.value = '';
+        timeEl.value = '';
+    }
+    const err = document.getElementById('cd-error'); if (err) err.style.display='none';
+    modalTitle.textContent = editItem ? 'Sửa deadline' : 'Thêm deadline thủ công';
+    // Removed cancel edit button
+    modal.classList.remove('hidden');
+    document.body.classList.add('no-scroll');
+    // force reflow then add showing for CSS transition
+    requestAnimationFrame(()=> {
+        modal.classList.add('showing');
+    });
+}
+
+function closeCustomDeadlineModal() {
+    const modal = document.getElementById('custom-deadline-modal');
+    if (modal) {
+        modal.classList.remove('showing');
+        setTimeout(()=> { modal.classList.add('hidden'); }, 220);
+    }
+    document.body.classList.remove('no-scroll');
+    appState.editingCustomDeadlineId = null;
+}
+
+async function saveCustomDeadlineFromModal() {
+    const titleEl = document.getElementById('cd-title');
+    const dateEl = document.getElementById('cd-date');
+    const timeEl = document.getElementById('cd-time');
+    const descEl = document.getElementById('cd-desc');
+    const courseEl = document.getElementById('cd-course-inline');
+    const completedEl = document.getElementById('cd-completed');
+    const errEl = document.getElementById('cd-error');
+    const colorEl = document.getElementById('cd-color');
+    const tagsEl = document.getElementById('cd-tags');
+    const reminderEl = document.getElementById('cd-reminder');
+    const title = titleEl.value.trim();
+    const dateVal = dateEl.value;
+    const timeVal = timeEl.value;
+    if (!title) { errEl.textContent='Vui lòng nhập tiêu đề'; errEl.style.display='block'; return; }
+    if (!dateVal) { errEl.textContent='Vui lòng chọn ngày'; errEl.style.display='block'; return; }
+    if (!timeVal) { errEl.textContent='Vui lòng chọn thời gian'; errEl.style.display='block'; return; }
+    const dueMs = Date.parse(dateVal + 'T' + timeVal);
+    if (isNaN(dueMs)) { errEl.textContent='Định dạng thời gian không hợp lệ'; errEl.style.display='block'; return; }
+    const dueSec = Math.floor(dueMs/1000);
+    if (dueSec < Math.floor(Date.now()/1000) - 3600) {
+        if (!confirm('Deadline đã ở quá khứ. Tiếp tục?')) return;
+    }
+    // Parse tags
+    let tags = [];
+    if (tagsEl && tagsEl.value.trim()) {
+        tags = tagsEl.value.split(',').map(t=> t.trim()).filter(Boolean).slice(0,10);
+    }
+    const reminderMinutes = reminderEl && reminderEl.value ? Number(reminderEl.value) : null;
+    const color = colorEl && colorEl.value ? colorEl.value : null;
+    const typeRadios = document.querySelectorAll('input[name="deadline-type"]');
+    const selectedType = Array.from(typeRadios).find(radio => radio.checked)?.value || 'assignment';
+    const payload = { title, description: descEl.value.trim(), courseId: courseEl.value || null, dueDate: dueSec, tags, reminderMinutes, color, type: selectedType };
+    try {
+        if (appState.editingCustomDeadlineId) {
+            await window.electronAPI.updateCustomDeadline(appState.editingCustomDeadlineId, payload);
+            showNotification('Đã cập nhật deadline', 'success');
+            // không cập nhật completed từ modal (đã bỏ)
+        } else {
+            await window.electronAPI.createCustomDeadline(payload);
+            showNotification('Đã thêm deadline', 'success');
+        }
+        closeCustomDeadlineModal();
+        loadCustomDeadlines();
+    } catch (e) {
+        errEl.textContent = 'Lưu thất bại: '+ e.message;
+        errEl.style.display='block';
+    }
+}
+
+function populateDeadlineCourseOptions() {
+    const select = document.getElementById('cd-course-inline');
+    if (!select) return;
+    const currentSemesterId = detectCurrentSemesterId();
+    const existing = new Set(Array.from(select.options).map(o=>o.value));
+    // Clear except first placeholder
+    for (let i = select.options.length -1; i >=1; i--) select.remove(i);
+    const courses = appState.courses.filter(c => {
+        if (!currentSemesterId) return true; // fallback
+        return appState.courseSemMap.get(c.id) === currentSemesterId;
+    });
+    courses.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.fullname || c.shortname || ('Course '+c.id);
+        select.appendChild(opt);
+    });
+}
+
+function detectCurrentSemesterId() {
+    // Improved: choose newest semester by (y2,y1,sem) parsed from category name.
+    // Fallback to frequency if parsing insufficient.
+    const semesterScores = []; // {id, y1, y2, sem, name}
+    const freq = new Map();
+    const seen = new Set();
+    appState.courses.forEach(c => {
+        const semId = appState.courseSemMap.get(c.id);
+        if (!semId) return;
+        freq.set(semId, (freq.get(semId)||0)+1);
+        if (seen.has(semId)) return;
+        seen.add(semId);
+        const cat = getCategory(semId);
+        if (!cat) return;
+        const { sem, y1, y2 } = parseSemesterName(cat.name || '');
+        if (y1 && y2) {
+            semesterScores.push({ id: semId, y1, y2, sem: sem || 0, name: cat.name });
+        }
+    });
+    if (semesterScores.length) {
+        semesterScores.sort((a,b)=> {
+            if (b.y2 !== a.y2) return b.y2 - a.y2; // later end year first
+            if (b.y1 !== a.y1) return b.y1 - a.y1; // later start year
+            if (b.sem !== a.sem) return b.sem - a.sem; // higher semester number
+            return 0;
+        });
+        return semesterScores[0].id;
+    }
+    // fallback: frequency heuristic
+    let best = null, max = 0;
+    freq.forEach((count, id) => { if (count > max) { max = count; best = id; } });
+    return best;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('custom-deadline-form');
+    if (form) form.addEventListener('submit', (e)=> { e.preventDefault(); saveCustomDeadlineFromModal(); });
+    // Removed cancel edit button event listener
+    const openBtn = document.getElementById('cd-open-modal');
+    if (openBtn) openBtn.addEventListener('click', () => openCustomDeadlineModal(null));
+    const closeBtn = document.getElementById('close-custom-deadline-modal');
+    if (closeBtn) closeBtn.addEventListener('click', closeCustomDeadlineModal);
+    
+    // Delete confirmation modal event listeners
+    const deleteModal = document.getElementById('delete-confirmation-modal');
+    const deleteCancel = document.getElementById('delete-cancel');
+    const deleteConfirm = document.getElementById('delete-confirm');
+    const deleteClose = document.getElementById('delete-modal-close');
+    
+    if (deleteModal && deleteCancel && deleteConfirm && deleteClose) {
+        // Function to close delete modal with animation
+        const closeDeleteModal = () => {
+            deleteModal.classList.remove('showing');
+            setTimeout(() => {
+                deleteModal.classList.add('hidden');
+                document.body.classList.remove('no-scroll');
+            }, 220); // Match modal exit animation duration
+        };
+        
+        // Cancel button
+        deleteCancel.addEventListener('click', closeDeleteModal);
+        
+        // Close button
+        deleteClose.addEventListener('click', closeDeleteModal);
+        
+        // Confirm button
+        deleteConfirm.addEventListener('click', async () => {
+            const deadlineId = deleteModal.dataset.deadlineId;
+            if (deadlineId) {
+                try {
+                    await window.electronAPI.deleteCustomDeadline(deadlineId);
+                    showNotification('Đã xóa deadline', 'success');
+                    loadCustomDeadlines();
+                    closeDeleteModal();
+                } catch (error) {
+                    showNotification('Lỗi xóa deadline', 'error');
+                    closeDeleteModal();
+                }
+            }
+        });
+        
+        // Close on overlay click
+        deleteModal.addEventListener('click', (e) => {
+            if (e.target === deleteModal) {
+                closeDeleteModal();
+            }
+        });
+    }
+    // Click outside to close
+    const cdModal = document.getElementById('custom-deadline-modal');
+    if (cdModal) {
+        cdModal.addEventListener('click', (e)=> {
+            if (e.target === cdModal) closeCustomDeadlineModal();
+        });
+    }
+
+    // Modal tabs switcher
+    const tabBtns = document.querySelectorAll('.modal-tab');
+    const panes = document.querySelectorAll('.modal-pane');
+    const stepsBar = document.getElementById('cd-steps-bar');
+    const order = ['overview','details','labels'];
+    function setActiveTab(tab) {
+        tabBtns.forEach(b=> b.classList.toggle('active', b.getAttribute('data-tab')===tab));
+        panes.forEach(p=> p.classList.toggle('active', p.getAttribute('data-pane')===tab));
+        if (stepsBar) {
+            const idx = Math.max(0, order.indexOf(tab));
+            const pct = ((idx+1)/order.length)*100;
+            stepsBar.style.width = pct + '%';
+        }
+        
+        // Update next button visibility
+        const nextBtn = document.getElementById('cd-next');
+        if (nextBtn) {
+            const currentIndex = order.indexOf(tab);
+            const isLastTab = currentIndex === order.length - 1;
+            nextBtn.style.display = isLastTab ? 'none' : 'flex';
+        }
+    }
+    if (tabBtns.length && panes.length) {
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', ()=> {
+                const tab = btn.getAttribute('data-tab');
+                setActiveTab(tab);
+            });
+        });
+    }
+
+    // Keyboard shortcuts: Esc to close, Ctrl+Arrow to navigate, 1-3 to jump
+    document.addEventListener('keydown', (e)=> {
+        const modal = document.getElementById('custom-deadline-modal');
+        if (!modal || modal.classList.contains('hidden')) return;
+        if (e.key === 'Escape') { e.preventDefault(); closeCustomDeadlineModal(); return; }
+        
+        // Don't trigger shortcuts when typing in inputs
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.contentEditable === 'true') return;
+        
+        const currentBtn = document.querySelector('.modal-tab.active');
+        const current = currentBtn ? currentBtn.getAttribute('data-tab') : 'overview';
+        let idx = Math.max(0, order.indexOf(current));
+        if (e.ctrlKey && e.key === 'ArrowRight') { idx = Math.min(order.length-1, idx+1); setActiveTab(order[idx]); }
+        if (e.ctrlKey && e.key === 'ArrowLeft') { idx = Math.max(0, idx-1); setActiveTab(order[idx]); }
+        // Only allow number shortcuts when not typing in inputs
+        if (!e.ctrlKey && /^[1-3]$/.test(e.key) && !e.target.closest('input, textarea, [contenteditable]')) { 
+            const n = Number(e.key)-1; 
+            if (order[n]) setActiveTab(order[n]); 
+        }
+    });
+
+    // Auto-advance flow: title -> deadline (removed auto tab switching)
+    const titleEl = document.getElementById('cd-title');
+    if (titleEl) titleEl.addEventListener('keydown', (e)=> { if (e.key==='Enter') { e.preventDefault(); setActiveTab('overview'); const date = document.getElementById('cd-date'); if (date) date.focus(); }});
+    // Removed auto tab switching for date/time changes
+
+    // Next button functionality
+    const nextBtn = document.getElementById('cd-next');
+    if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+            const currentTab = document.querySelector('.modal-tab.active');
+            if (currentTab) {
+                const currentPane = currentTab.getAttribute('data-tab');
+                const tabOrder = ['overview', 'details', 'labels'];
+                const currentIndex = tabOrder.indexOf(currentPane);
+                if (currentIndex < tabOrder.length - 1) {
+                    setActiveTab(tabOrder[currentIndex + 1]);
+                }
+            }
+        });
+        
+        // Update button visibility based on current tab
+        const updateNextButton = () => {
+            const currentTab = document.querySelector('.modal-tab.active');
+            if (currentTab) {
+                const currentPane = currentTab.getAttribute('data-tab');
+                const tabOrder = ['overview', 'details', 'labels'];
+                const currentIndex = tabOrder.indexOf(currentPane);
+                const isLastTab = currentIndex === tabOrder.length - 1;
+                
+                if (isLastTab) {
+                    nextBtn.style.display = 'none';
+                } else {
+                    nextBtn.style.display = 'flex';
+                }
+            }
+        };
+        
+        // Update button on tab change
+        const tabButtons = document.querySelectorAll('.modal-tab');
+        tabButtons.forEach(tab => {
+            tab.addEventListener('click', updateNextButton);
+        });
+        
+        // Initial update
+        updateNextButton();
+    }
+
+    // Type selector visual feedback
+    const typeOptions = document.querySelectorAll('.type-option');
+    typeOptions.forEach(option => {
+        option.addEventListener('click', () => {
+            // Add visual feedback
+            option.style.transform = 'scale(0.98)';
+            setTimeout(() => {
+                option.style.transform = '';
+            }, 150);
+        });
+    });
+    const filterSelect = document.getElementById('cd-filter-status');
+    if (filterSelect) filterSelect.addEventListener('change', renderCustomDeadlines);
+    const sortSelect = document.getElementById('cd-sort-order');
+    if (sortSelect) sortSelect.addEventListener('change', renderCustomDeadlines);
+
+    // Decorative glow follows mouse on list card
+    const listCard = document.querySelector('.custom-deadline-list-card');
+    const glow = document.getElementById('cd-decor-glow');
+    if (listCard && glow) {
+        listCard.addEventListener('mousemove', (e)=> {
+            const rect = listCard.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / rect.width * 100;
+            glow.style.setProperty('--mx', x + '%');
+        });
+    }
+
+    // Quick presets & datetime preview
+    const dateInput = document.getElementById('cd-date');
+    const timeInput = document.getElementById('cd-time');
+    const presetContainer = document.getElementById('cd-quick-presets');
+    const weekdayEl = document.getElementById('cd-due-weekday');
+    const relativeEl = document.getElementById('cd-due-relative');
+    function setDue(date) {
+        if (!dateInput || !timeInput) return; 
+        const dateStr = date.toISOString().slice(0,10);
+        const timeStr = date.toISOString().slice(11,16);
+        dateInput.value = dateStr;
+        timeInput.value = timeStr;
+        updatePreview();
+    }
+    function endOfDay(d) { const dt = new Date(d); dt.setHours(23,59,0,0); return dt; }
+    function nextWeekMonday() {
+        const d = new Date();
+        const day = d.getDay(); // 0=Sun
+        const daysUntilMon = ((8 - day) % 7) || 7; // next Monday
+        d.setDate(d.getDate()+daysUntilMon);
+        d.setHours(8,0,0,0);
+        return d;
+    }
+    function updatePreview() {
+        if (!dateInput || !timeInput) return;
+        const dateVal = dateInput.value;
+        const timeVal = timeInput.value;
+        if (!dateVal || !timeVal) { 
+            if (weekdayEl) weekdayEl.textContent='--'; 
+            if (relativeEl) relativeEl.textContent=''; 
+            return; 
+        }
+        const dt = new Date(dateVal + 'T' + timeVal);
+        if (isNaN(dt.getTime())) return;
+        const weekdays = ['CN','T2','T3','T4','T5','T6','T7'];
+        if (weekdayEl) weekdayEl.textContent = weekdays[dt.getDay()] + ', ' + dt.toLocaleDateString('vi-VN');
+        const diffMs = dt - new Date();
+        if (relativeEl) {
+            if (diffMs < 0) relativeEl.textContent = 'Đã qua';
+            else {
+                const diffH = Math.round(diffMs/3600000);
+                if (diffH < 24) relativeEl.textContent = diffH + 'h nữa';
+                else {
+                    const diffD = Math.round(diffMs/86400000);
+                    relativeEl.textContent = diffD + ' ngày nữa';
+                }
+            }
+        }
+    }
+    if (dateInput) dateInput.addEventListener('input', updatePreview);
+    if (timeInput) timeInput.addEventListener('input', updatePreview);
+    if (presetContainer) {
+        presetContainer.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-preset]');
+            if (!btn) return;
+            const type = btn.getAttribute('data-preset');
+            const now = new Date();
+            if (type === 'today-eod') setDue(endOfDay(now));
+            else if (type === 'tomorrow-eod') { const t = new Date(now); t.setDate(t.getDate()+1); setDue(endOfDay(t)); }
+            else if (type === 'plus3') { const t = new Date(now); t.setDate(t.getDate()+3); setDue(endOfDay(t)); }
+            else if (type === 'nextweek') { setDue(nextWeekMonday()); }
+            else if (type === 'plus1w') { const t = new Date(now); t.setDate(t.getDate()+7); setDue(endOfDay(t)); }
+            else if (type === 'endmonth') { const t = new Date(now); t.setMonth(t.getMonth()+1, 0); t.setHours(23,59,0,0); setDue(t); }
+        });
+    }
+    updatePreview();
+});
+
+// After login success (some existing function should call) we will call loadCustomDeadlines.
+// Hook into existing login logic: find a safe place - simplest: poll for mainApp visible then load once.
+    const cdInitInterval = setInterval(() => {
+        const mainAppEl = document.getElementById('main-app');
+        if (mainAppEl && !mainAppEl.classList.contains('hidden')) {
+            clearInterval(cdInitInterval);
+            loadCustomDeadlines();
+        }
+    }, 1500);
+
+function createCourseCard(course) {
+    const semester = appState.courseSemMap.get(course.id) ? 
+        getCategory(appState.courseSemMap.get(course.id)) : null;
+    const semesterInfo = semester ? semester.name : 'Khóa học chung';
+    const instructorInfo = course.instructor || 'Chưa có thông tin giảng viên';
+    
+    return `
+        <div class="course-card-modern" onclick="openCourseDetails(${course.id})">
+            <div class="course-card-header">
+                <div>
+                    <h3 class="course-title">${course.fullname}</h3>
+                    <div class="course-code">${course.shortname}</div>
+                </div>
+            </div>
+            <div class="course-meta">
+                <div class="course-meta-item">
+                    <i class="fas fa-user"></i>
+                    <span>${instructorInfo}</span>
+                </div>
+                <div class="course-meta-item">
+                    <i class="fas fa-calendar"></i>
+                    <span>${semesterInfo}</span>
+                </div>
+            </div>
+            <div class="course-actions">
+                <button class="btn btn-primary" onclick="event.stopPropagation(); openCourseDetails(${course.id})">
+                    <i class="fas fa-eye"></i>
+                    Xem chi tiết
+                </button>
+                <button class="btn btn-outline" onclick="event.stopPropagation(); openCourseInBrowser(${course.id})">
+                    <i class="fas fa-external-link-alt"></i>
+                    Mở web
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function updateSettings() {
+    elements.currentStudentId.textContent = appState.currentStudentId || '-';
+    elements.currentUsername.textContent = appState.currentUser?.fullname || '-';
+    updateSidebarUserInfo();
+    // Load auto-start setting into UI when present
+    (async () => {
+        try {
+            const res = await window.electronAPI.getAutoStart();
+            const el = document.getElementById('auto-start-windows');
+            if (res?.success && el) el.checked = !!res.enabled;
+        } catch {}
+    })();
+}
+
+// Navigation functions
+function schedulePeriodStartMinute(periodNum) {
+    const map = {
+        1: 450, 2: 495, 3: 540, 4: 600, 5: 645,
+        6: 780, 7: 825, 8: 870, 9: 930, 10: 975,
+    };
+    const p = Number(periodNum);
+    return map[p] ?? null;
+}
+
+function scheduleItemStartDate(it) {
+    if (!(it?.date instanceof Date)) return null;
+    const d = new Date(it.date);
+    d.setHours(0, 0, 0, 0);
+    const periods = Array.isArray(it.periods) ? it.periods : [];
+    const p0 = periods.length ? Number(periods[0]) : 1;
+    const startMin = schedulePeriodStartMinute(p0) ?? 450;
+    d.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+    return d;
+}
+
+function scheduleItemStartMs(it) {
+    const d = scheduleItemStartDate(it);
+    return d ? d.getTime() : null;
+}
+
+function isScheduleItemPast(it) {
+    const ms = scheduleItemStartMs(it);
+    if (ms === null) return false;
+    return ms <= Date.now();
+}
+
+function notifyPostedMs(it) {
+    const raw = String(it.dated || '').trim();
+    if (!raw) return 0;
+    const t = Date.parse(raw.replace(' ', 'T'));
+    return Number.isFinite(t) ? t : 0;
+}
+
+function sortKeyEventMs(it) {
+    const ms = scheduleItemStartMs(it);
+    if (ms !== null) return ms;
+    if (it.date instanceof Date) return it.date.getTime();
+    return Number.POSITIVE_INFINITY;
+}
+
+function formatScheduleCountdown(targetMs) {
+    const now = Date.now();
+    const diff = targetMs - now;
+    if (diff <= 0) return { text: 'Đã qua', tone: 'muted' };
+    const sec = Math.floor(diff / 1000);
+    const days = Math.floor(sec / 86400);
+    const hours = Math.floor((sec % 86400) / 3600);
+    const mins = Math.floor((sec % 3600) / 60);
+    if (days > 0) return { text: `Còn ${days} ngày`, tone: days <= 1 ? 'soon' : 'calm' };
+    if (hours > 0) return { text: `Còn ${hours} giờ ${mins}p`, tone: hours < 3 ? 'soon' : 'calm' };
+    return { text: `Còn ${mins} phút`, tone: 'urgent' };
+}
+
+function formatScheduleItemDisplayTitle(it) {
+    const code = it.code ? String(it.code).trim() : '';
+    const t = String(it.title || '');
+    const m = /\(([^)]+)\)/.exec(t);
+    const name = m ? m[1].trim() : '';
+    if (code && name) return `${code} · ${name}`;
+    if (code) return code;
+    return t.replace(/^\[[^\]]+\]\s*/g, '').replace(/^-\s*/, '').trim() || 'Thông báo';
+}
+
+let scheduleUpdatesTickTimer = null;
+function ensureScheduleUpdatesCountdownTick() {
+    if (scheduleUpdatesTickTimer) clearInterval(scheduleUpdatesTickTimer);
+    scheduleUpdatesTickTimer = setInterval(() => {
+        const sec = document.getElementById('schedule-updates-section');
+        if (!sec || sec.classList.contains('hidden')) return;
+        renderScheduleUpdates();
+    }, 30000);
+}
+
+function stopScheduleUpdatesCountdownTick() {
+    if (scheduleUpdatesTickTimer) {
+        clearInterval(scheduleUpdatesTickTimer);
+        scheduleUpdatesTickTimer = null;
+    }
+}
+
+function showSection(sectionName) {
+    // Hide all sections (including new ones)
+    const allSections = document.querySelectorAll('.content-section');
+    allSections.forEach(section => {
+        section.classList.remove('showing');
+        section.classList.add('hidden');
+    });
+    
+    // Show selected section
+    const targetSection = document.getElementById(`${sectionName}-section`);
+    if (targetSection) {
+        targetSection.classList.remove('hidden');
+        requestAnimationFrame(() => {
+            targetSection.classList.add('showing');
+        });
+    } else {
+        console.error('Section not found:', `${sectionName}-section`);
+    }
+    
+    // Update navigation
+    elements.navItems.forEach(item => {
+        item.classList.remove('active');
+    });
+    
+    const activeNavItem = document.querySelector(`[data-section="${sectionName}"]`);
+    if (activeNavItem) {
+        activeNavItem.classList.add('active');
+    }
+
+    if (sectionName === 'schedule-updates') {
+        ensureScheduleUpdatesCountdownTick();
+        renderScheduleUpdates();
+    } else {
+        stopScheduleUpdatesCountdownTick();
+    }
+}
+
+// Timetable: open external TKB
+async function initTimetableUI() {
+    if (appState.timetableInited) return; // prevent double-binding
+    if (elements.timetableSource) {
+        try {
+            const savedSrc = await window.electronAPI.getSetting('timetable.source');
+            const src = savedSrc === 'api' ? 'api' : 'ics';
+            appState.timetableSource = src;
+            elements.timetableSource.value = src;
+        } catch {
+            appState.timetableSource = 'ics';
+        }
+        elements.timetableSource.addEventListener('change', async (e) => {
+            const v = e.target.value === 'api' ? 'api' : 'ics';
+            appState.timetableSource = v;
+            try { await window.electronAPI.setSetting('timetable.source', v); } catch {}
+            try {
+                if (v === 'api') {
+                    const data = await stcFetchAll({ force: false });
+                    appState.timetableEvents = buildTimetableEventsFromStcCourses(data?.courses);
+                    initWeek(new Date());
+                    renderTimetable();
+                } else {
+                    parseIcsToEvents();
+                    initWeek(new Date());
+                    renderTimetable();
+                }
+            } catch (err) {
+                showNotification(err.message || 'Không thể đổi nguồn TKB', 'error');
+            }
+        });
+    }
+    if (elements.openTkbWeb) {
+        elements.openTkbWeb.onclick = () => window.electronAPI.openExternal('https://student.uit.edu.vn/sinhvien/tkb');
+    }
+    if (elements.importIcsBtn) {
+        elements.importIcsBtn.onclick = async () => {
+            const res = await window.electronAPI.importIcsFile();
+            if (res?.success && res.content) {
+                appState.icsRaw = res.content;
+                await window.electronAPI.setSetting('timetable.ics', res.content);
+                parseIcsToEvents();
+                initWeek(new Date());
+                renderTimetable();
+                showNotification('Đã nhập thời khóa biểu', 'success');
+                if (elements.timetableGuide) elements.timetableGuide.classList.add('hidden');
+            } else if (!res?.cancelled) {
+                showNotification(res?.error || 'Không thể đọc file .ics', 'error');
+            }
+        };
+    }
+
+    // Load stored ICS
+    try {
+        const saved = await window.electronAPI.getSetting('timetable.ics');
+        if (appState.timetableSource !== 'api' && typeof saved === 'string' && saved.trim()) {
+            appState.icsRaw = saved;
+            parseIcsToEvents();
+            initWeek(new Date());
+            renderTimetable();
+            if (elements.timetableGuide) elements.timetableGuide.classList.add('hidden');
+        }
+    } catch {}
+    if (appState.timetableSource === 'api') {
+        try {
+            const data = await stcFetchAll({ force: false });
+            appState.timetableEvents = buildTimetableEventsFromStcCourses(data?.courses);
+            initWeek(new Date());
+            renderTimetable();
+            if (elements.timetableGuide) elements.timetableGuide.classList.add('hidden');
+        } catch {}
+    }
+    appState.timetableInited = true;
+}
+
+function parseApiTietToPeriods(rawTiet) {
+    const s = String(rawTiet || '').trim();
+    if (!s) return [];
+    const out = [];
+    let i = 0;
+    while (i < s.length) {
+        if (s[i] === '1' && s[i + 1] === '0') {
+            out.push(10);
+            i += 2;
+            continue;
+        }
+        if (s[i] === '0') {
+            out.push(10);
+            i += 1;
+            continue;
+        }
+        const n = parseInt(s[i], 10);
+        if (Number.isFinite(n) && n >= 1 && n <= 9) out.push(n);
+        i += 1;
+    }
+    return Array.from(new Set(out)).sort((a, b) => a - b);
+}
+
+function buildTimetableEventsFromStcCourses(coursesBlocks) {
+    const blocks = Array.isArray(coursesBlocks) ? coursesBlocks : [];
+    const events = [];
+    const baseTermStart = new Date(2000, 0, 1);
+    baseTermStart.setHours(0, 0, 0, 0);
+    blocks.forEach(b => {
+        const list = Array.isArray(b?.course) ? b.course : [];
+        list.forEach(c => {
+            const thuNum = parseInt(c?.thu, 10);
+            const jsDow = Number.isFinite(thuNum) ? Math.max(2, Math.min(7, thuNum)) - 1 : null;
+            const periods = parseApiTietToPeriods(c?.tiet);
+            if (!jsDow || !periods.length) return;
+            const code = String(c?.malop || '').trim().toUpperCase();
+            const loc = String(c?.phonghoc || '').trim().replace(/^P\./i, '').trim();
+            events.push({
+                dow: jsDow,
+                startMin: 0,
+                endMin: 0,
+                title: code || 'Môn học',
+                location: loc,
+                single: false,
+                termStart: baseTermStart,
+                until: null,
+                interval: 1,
+                periods,
+                code,
+                instructor: '',
+                source: 'api',
+            });
+        });
+    });
+    return events;
+}
+
+function formatStcAuthMeta(authState) {
+    if (!authState) return '';
+    const sid = authState.sid ? `MSSV: ${authState.sid}` : '';
+    const expiresAt = authState.expiresAt ? new Date(authState.expiresAt) : null;
+    const expiresText = expiresAt ? expiresAt.toLocaleString('vi-VN') : '';
+    const hasPassword = authState.hasPassword ? 'Đã lưu mật khẩu local' : 'Chưa lưu mật khẩu';
+    const tokenState = expiresAt
+        ? (Date.now() < expiresAt.getTime() ? 'Token còn hạn' : 'Token hết hạn')
+        : (authState.hasToken ? 'Token còn hạn' : 'Chưa có token');
+
+    const chip = (label, tone) => `<span class="stc-chip ${tone || ''}">${escapeHtml(label)}</span>`;
+    const parts = [];
+    if (sid) parts.push(chip(sid, ''));
+    parts.push(chip(tokenState + (expiresText ? `: ${expiresText}` : ''), tokenState.includes('hết hạn') ? 'danger' : (tokenState.includes('còn hạn') ? 'success' : '')));
+    parts.push(chip(hasPassword, authState.hasPassword ? 'info' : ''));
+    return `<div class="stc-meta-row">${parts.join('')}</div>`;
+}
+
+async function loadStcAuthStateIntoForms() {
+    try {
+        const resp = await window.electronAPI.stcGetAuthState();
+        if (!resp?.success) return;
+        appState.stc.authState = resp.data;
+        const sid = String(resp.data?.sid || '');
+        appState.stc.sid = sid;
+        const meta = formatStcAuthMeta(resp.data);
+        if (elements.stcBannerUpdates) elements.stcBannerUpdates.innerHTML = meta || '<span class="stc-chip">Chưa kết nối STC</span>';
+        if (elements.stcBannerGrades) elements.stcBannerGrades.innerHTML = meta || '<span class="stc-chip">Chưa kết nối STC</span>';
+        if (elements.stcProfileMeta) elements.stcProfileMeta.innerHTML = meta;
+        if (elements.stcProfileSid && !elements.stcProfileSid.value) elements.stcProfileSid.value = sid;
+
+        await loadStcCachedProfileIntoUI();
+    } catch {}
+}
+
+function normalizeStcProfilePayload(payload) {
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const pick = (...keys) => {
+        for (const k of keys) {
+            const v = p[k];
+            if (v !== undefined && v !== null && String(v).trim()) return String(v).trim();
+        }
+        return '';
+    };
+    const profile = {
+        fullName: pick('fullname', 'hoten', 'name', 'ten', 'hoTen'),
+        studentId: pick('mssv', 'sid', 'studentid', 'masv', 'username'),
+        className: pick('lop', 'class', 'classname', 'malop'),
+        major: pick('nganh', 'major'),
+        faculty: pick('khoa', 'faculty'),
+        department: pick('bomon', 'department'),
+        email: pick('email', 'mail'),
+    };
+    return profile;
+}
+
+function mergeStcProfile(rawA, rawB) {
+    const a = normalizeStcProfilePayload(rawA);
+    const b = normalizeStcProfilePayload(rawB);
+    return {
+        fullName: b.fullName || a.fullName,
+        studentId: b.studentId || a.studentId,
+        className: b.className || a.className,
+        major: b.major || a.major,
+        faculty: b.faculty || a.faculty,
+        department: b.department || a.department,
+        email: b.email || a.email,
+    };
+}
+
+function renderStcProfileExtra(profile, opts = {}) {
+    const rows = [];
+    const add = (label, value) => {
+        if (!value) return;
+        rows.push(
+            `<div class="stc-profile-row"><div class="stc-profile-label">${escapeHtml(label)}</div><div class="stc-profile-value">${escapeHtml(value)}</div></div>`
+        );
+    };
+    add('MSSV (STC)', opts.stcSid);
+    add('Lớp', profile.className);
+    add('Ngành', profile.major);
+    add('Khoa', profile.faculty);
+    add('Bộ môn', profile.department);
+    add('Email', profile.email);
+    return rows.join('');
+}
+
+function computeStcGradeSummaryChung(scores) {
+    try {
+        if (!Array.isArray(scores) || !scores.length) return null;
+        const allRows = scores.flatMap(b => Array.isArray(b?.score) ? b.score : []);
+        const isCountedForAvg = (r) => {
+            const tc = parseFloat(r?.sotc);
+            if (!Number.isFinite(tc) || tc <= 0) return false;
+            const g = parseFloat(r?.diem);
+            if (!Number.isFinite(g)) return false;
+            const d1 = parseFloat(r?.diem1);
+            const d2 = parseFloat(r?.diem2);
+            const d3 = parseFloat(r?.diem3);
+            const d4 = parseFloat(r?.diem4);
+            const hasComponent = [d1, d2, d3, d4].some(x => Number.isFinite(x));
+            if (g === 0 && !hasComponent) return false;
+            return true;
+        };
+        const isEnglishExemptRow = (r) => {
+            const tc = parseFloat(r?.sotc);
+            if (!Number.isFinite(tc) || tc <= 0) return false;
+            const g = parseFloat(r?.diem);
+            const d1 = parseFloat(r?.diem1);
+            const d2 = parseFloat(r?.diem2);
+            const d3 = parseFloat(r?.diem3);
+            const d4 = parseFloat(r?.diem4);
+            const hasComponent = [d1, d2, d3, d4].some(x => Number.isFinite(x));
+            if (!(g === 0 && !hasComponent)) return false;
+            const mamh = String(r?.mamh || '').trim().toUpperCase();
+            const tenmh = String(r?.tenmh || '').trim().toLowerCase();
+            return /^ENG\d+/i.test(mamh) || tenmh.includes('anh văn');
+        };
+        const normalizeCourseKey = (r) => String(r?.mamh || '').trim().toUpperCase();
+        const pickBestAttemptByCourse = (rows) => {
+            const by = new Map();
+            rows.forEach(r => {
+                const tc = parseFloat(r?.sotc);
+                if (!Number.isFinite(tc) || tc <= 0) return;
+                const g = parseFloat(r?.diem);
+                const eligible = Number.isFinite(g) || isEnglishExemptRow(r);
+                if (!eligible) return;
+                const key = normalizeCourseKey(r);
+                if (!key) return;
+                const current = by.get(key);
+                if (!current) {
+                    by.set(key, r);
+                    return;
+                }
+                const g0 = parseFloat(current?.diem);
+                const v = Number.isFinite(g) ? g : -Infinity;
+                const v0 = Number.isFinite(g0) ? g0 : -Infinity;
+                if (v > v0) by.set(key, r);
+            });
+            return Array.from(by.values());
+        };
+        const computeAvg = (rows) => {
+            let sum = 0;
+            let credits = 0;
+            rows.forEach(r => {
+                const tc = parseFloat(r?.sotc);
+                const g = parseFloat(r?.diem);
+                if (!isCountedForAvg(r)) return;
+                sum += g * tc;
+                credits += tc;
+            });
+            return credits > 0 ? { avg: sum / credits, credits } : { avg: null, credits: 0 };
+        };
+        const computeAccumulatedCredits = (rows) => {
+            let credits = 0;
+            rows.forEach(r => {
+                const tc = parseFloat(r?.sotc);
+                const g = parseFloat(r?.diem);
+                if (!Number.isFinite(tc) || tc <= 0) return;
+                const d1 = parseFloat(r?.diem1);
+                const d2 = parseFloat(r?.diem2);
+                const d3 = parseFloat(r?.diem3);
+                const d4 = parseFloat(r?.diem4);
+                const hasComponent = [d1, d2, d3, d4].some(x => Number.isFinite(x));
+                const mamh = String(r?.mamh || '').trim().toUpperCase();
+                const tenmh = String(r?.tenmh || '').trim().toLowerCase();
+                const isEnglishExempt = g === 0 && !hasComponent && (/^ENG\d+/i.test(mamh) || tenmh.includes('anh văn'));
+                if (Number.isFinite(g) && g >= 5) credits += tc;
+                else if (isEnglishExempt) credits += tc;
+            });
+            return credits;
+        };
+        const bestAttempts = pickBestAttemptByCourse(allRows);
+        const chungCreditsAccum = Math.round(computeAccumulatedCredits(bestAttempts));
+        const bestAttemptsPassed = bestAttempts.filter(r => {
+            const g = parseFloat(r?.diem);
+            return Number.isFinite(g) && g >= 5;
+        });
+        const chungTichLuy = computeAvg(bestAttemptsPassed);
+        if (chungCreditsAccum <= 0 && chungTichLuy.avg === null) return null;
+        return {
+            avgTichLuy: chungTichLuy.avg,
+            creditsTichLuy: chungCreditsAccum,
+            courseCount: bestAttempts.length,
+        };
+    } catch {
+        return null;
+    }
+}
+
+async function loadStcCachedProfileIntoUI() {
+    try {
+        const extra = document.getElementById('stc-profile-extra');
+        const cached = await window.electronAPI.getSetting('stc.profile');
+        let profile = normalizeStcProfilePayload(cached);
+        const rawAll = appState.stc?.allData;
+        if (rawAll && typeof rawAll === 'object') {
+            profile = mergeStcProfile(profile, rawAll);
+        }
+        const moodleName = (appState.currentUser?.fullname || '').trim()
+            || [appState.currentUser?.firstname, appState.currentUser?.lastname].filter(Boolean).join(' ').trim();
+        const moodleId = String(appState.currentStudentId || '').trim();
+        const stcSid = String(appState.stc?.sid || '').trim();
+        if (elements.stcProfileName) {
+            elements.stcProfileName.textContent = profile.fullName || moodleName || '-';
+        }
+        if (elements.stcProfileStudentId) {
+            elements.stcProfileStudentId.textContent = moodleId || '-';
+        }
+        const scores = Array.isArray(rawAll?.scores) ? rawAll.scores : [];
+        const gradeSnap = computeStcGradeSummaryChung(scores);
+        const avgTxt = gradeSnap && gradeSnap.avgTichLuy !== null && gradeSnap.avgTichLuy !== undefined
+            ? Number(gradeSnap.avgTichLuy).toFixed(2)
+            : '—';
+        const gradeRows = gradeSnap
+            ? `<div class="stc-profile-row"><div class="stc-profile-label">TB chung tích lũy</div><div class="stc-profile-value">${escapeHtml(avgTxt)} <span class="stc-subtle">(${gradeSnap.creditsTichLuy} TC tích lũy)</span></div></div><div class="stc-profile-note">Trùng «Điểm trung bình chung tích lũy» và «Số tín chỉ tích lũy» trên tab Điểm (môn đạt ≥ 5.0; tín chỉ gồm miễn Anh văn nếu có).</div>`
+            : '';
+        if (extra) extra.innerHTML = renderStcProfileExtra(profile, { stcSid }) + gradeRows;
+    } catch {}
+}
+
+async function fetchAndCacheStcProfile({ force = false } = {}) {
+    try {
+        const sid = String(appState.stc.sid || '').trim();
+        if (!sid) return;
+        const res = await window.electronAPI.stcGetCurrent(sid, { force: Boolean(force) });
+        if (!res?.success || !res.data) return;
+        const prev = await window.electronAPI.getSetting('stc.profile');
+        const merged = mergeStcProfile(prev, res.data);
+        await window.electronAPI.setSetting('stc.profile', merged);
+        await loadStcCachedProfileIntoUI();
+    } catch {}
+}
+
+async function stcLoginFromProfile() {
+    const sid = String(elements.stcProfileSid?.value || '').trim();
+    const pass = String(elements.stcProfilePass?.value || '');
+    const remember = Boolean(elements.stcProfileRemember?.checked);
+    const res = await window.electronAPI.stcLogin(sid, pass, remember);
+    if (!res?.success) {
+        showNotification(res?.error || 'Đăng nhập thất bại', 'error');
+        return false;
+    }
+    await loadStcAuthStateIntoForms();
+    await fetchAndCacheStcProfile({ force: true });
+    return true;
+}
+
+async function stcFetchAll({ force = false } = {}) {
+    const sid = String(appState.stc.sid || '').trim();
+    if (!sid) throw new Error('Chưa có MSSV');
+    const res = await window.electronAPI.stcGetAll(sid, { force, maxAgeMs: 10 * 60 * 1000 });
+    if (!res?.success) throw new Error(res?.error || 'Không lấy được dữ liệu');
+    appState.stc.sid = sid;
+    appState.stc.allData = res.data;
+    appState.stc.allTimestamp = res.timestamp || Date.now();
+    return res.data;
+}
+
+function hydrateStcDerivedData() {
+    try {
+        const data = appState.stc.allData;
+        if (!data) return;
+        if (Array.isArray(data.notify)) {
+            appState.scheduleOverrides = normalizeScheduleUpdatesFromNotify(data.notify);
+        }
+        populateScheduleUpdatesCourseFilter();
+    } catch {}
+}
+
+function escapeHtml(s) {
+    return String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function gradeFinalCellClass(raw) {
+    if (raw === null || raw === undefined || raw === '') return 'grade-cell-empty';
+    const g = parseFloat(String(raw).replace(',', '.'));
+    if (!Number.isFinite(g)) return 'grade-cell-empty';
+    if (g >= 8) return 'grade-cell-high';
+    if (g >= 5) return 'grade-cell-pass';
+    return 'grade-cell-low';
+}
+
+function renderGrades() {
+    if (!elements.gradesContent) return;
+    const data = appState.stc.allData;
+    const scores = Array.isArray(data?.scores) ? data.scores : [];
+    const q = String(elements.gradesSearch?.value || '').trim().toLowerCase();
+    const semesterFilter = String(elements.gradesSemester?.value || '').trim();
+    const sortMode = String(elements.gradesSort?.value || 'newest');
+
+    if (!scores.length) {
+        elements.gradesContent.innerHTML = '<div class="empty-state"><h3>Chưa có dữ liệu điểm</h3><p>Hãy đăng nhập và làm mới để tải điểm.</p></div>';
+        if (elements.gradesSummary) elements.gradesSummary.innerHTML = '';
+        if (elements.gradesSemester) elements.gradesSemester.innerHTML = '<option value="">Tất cả kỳ</option>';
+        return;
+    }
+
+    const parseBlockKey = (name) => {
+        const s = String(name || '');
+        const m = /HK\s*(\d+).*NH\s*(\d{4})\s*-\s*(\d{4})/i.exec(s);
+        if (!m) return { year: 0, semester: 0, label: s };
+        return { year: parseInt(m[2], 10) || 0, semester: parseInt(m[1], 10) || 0, label: s };
+    };
+
+    const blockInfos = scores.map(b => ({ ...parseBlockKey(b?.name), name: String(b?.name || '') }));
+    const uniqueLabels = Array.from(new Set(blockInfos.map(b => b.name))).filter(Boolean);
+    uniqueLabels.sort((a, b) => {
+        const ka = parseBlockKey(a);
+        const kb = parseBlockKey(b);
+        if (kb.year !== ka.year) return kb.year - ka.year;
+        return kb.semester - ka.semester;
+    });
+    if (elements.gradesSemester) {
+        const current = elements.gradesSemester.value;
+        elements.gradesSemester.innerHTML = ['<option value="">Tất cả kỳ</option>']
+            .concat(uniqueLabels.map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`))
+            .join('');
+        elements.gradesSemester.value = uniqueLabels.includes(current) ? current : semesterFilter;
+    }
+
+    const sortedScores = scores.slice().sort((a, b) => {
+        const ka = parseBlockKey(a?.name);
+        const kb = parseBlockKey(b?.name);
+        if (ka.year !== kb.year) return sortMode === 'oldest' ? ka.year - kb.year : kb.year - ka.year;
+        return sortMode === 'oldest' ? ka.semester - kb.semester : kb.semester - ka.semester;
+    });
+
+    const isCountedForAvg = (r) => {
+        const tc = parseFloat(r?.sotc);
+        if (!Number.isFinite(tc) || tc <= 0) return false;
+        const g = parseFloat(r?.diem);
+        if (!Number.isFinite(g)) return false;
+        const d1 = parseFloat(r?.diem1);
+        const d2 = parseFloat(r?.diem2);
+        const d3 = parseFloat(r?.diem3);
+        const d4 = parseFloat(r?.diem4);
+        const hasComponent = [d1, d2, d3, d4].some(x => Number.isFinite(x));
+        if (g === 0 && !hasComponent) return false;
+        return true;
+    };
+
+    const isEnglishExemptRow = (r) => {
+        const tc = parseFloat(r?.sotc);
+        if (!Number.isFinite(tc) || tc <= 0) return false;
+        const g = parseFloat(r?.diem);
+        const d1 = parseFloat(r?.diem1);
+        const d2 = parseFloat(r?.diem2);
+        const d3 = parseFloat(r?.diem3);
+        const d4 = parseFloat(r?.diem4);
+        const hasComponent = [d1, d2, d3, d4].some(x => Number.isFinite(x));
+        if (!(g === 0 && !hasComponent)) return false;
+        const mamh = String(r?.mamh || '').trim().toUpperCase();
+        const tenmh = String(r?.tenmh || '').trim().toLowerCase();
+        return /^ENG\d+/i.test(mamh) || tenmh.includes('anh văn');
+    };
+
+    const computeAvg = (rows) => {
+        let sum = 0;
+        let credits = 0;
+        rows.forEach(r => {
+            const tc = parseFloat(r?.sotc);
+            const g = parseFloat(r?.diem);
+            if (!isCountedForAvg(r)) return;
+            sum += g * tc;
+            credits += tc;
+        });
+        return credits > 0 ? { avg: sum / credits, credits } : { avg: null, credits: 0 };
+    };
+
+    const allRows = sortedScores.flatMap(b => Array.isArray(b?.score) ? b.score : []);
+
+    const normalizeCourseKey = (r) => String(r?.mamh || '').trim().toUpperCase();
+    const pickBestAttemptByCourse = (rows) => {
+        const by = new Map();
+        rows.forEach(r => {
+            const tc = parseFloat(r?.sotc);
+            if (!Number.isFinite(tc) || tc <= 0) return;
+            const g = parseFloat(r?.diem);
+            const eligible = Number.isFinite(g) || isEnglishExemptRow(r);
+            if (!eligible) return;
+            const key = normalizeCourseKey(r);
+            if (!key) return;
+            const current = by.get(key);
+            if (!current) {
+                by.set(key, r);
+                return;
+            }
+            const g0 = parseFloat(current?.diem);
+            const v = Number.isFinite(g) ? g : -Infinity;
+            const v0 = Number.isFinite(g0) ? g0 : -Infinity;
+            if (v > v0) by.set(key, r);
+        });
+        return Array.from(by.values());
+    };
+
+    const computeCredits = (rows) => {
+        let credits = 0;
+        rows.forEach(r => {
+            const tc = parseFloat(r?.sotc);
+            if (!Number.isFinite(tc) || tc <= 0) return;
+            const g = parseFloat(r?.diem);
+            if (Number.isFinite(g) || isEnglishExemptRow(r)) credits += tc;
+        });
+        return credits;
+    };
+
+    const computeAccumulatedCredits = (rows) => {
+        let credits = 0;
+        rows.forEach(r => {
+            const tc = parseFloat(r?.sotc);
+            const g = parseFloat(r?.diem);
+            if (!Number.isFinite(tc) || tc <= 0) return;
+            const d1 = parseFloat(r?.diem1);
+            const d2 = parseFloat(r?.diem2);
+            const d3 = parseFloat(r?.diem3);
+            const d4 = parseFloat(r?.diem4);
+            const hasComponent = [d1, d2, d3, d4].some(x => Number.isFinite(x));
+
+            const mamh = String(r?.mamh || '').trim().toUpperCase();
+            const tenmh = String(r?.tenmh || '').trim().toLowerCase();
+            const isEnglishExempt = g === 0 && !hasComponent && (/^ENG\d+/i.test(mamh) || tenmh.includes('anh văn'));
+
+            if (Number.isFinite(g) && g >= 5) credits += tc;
+            else if (isEnglishExempt) credits += tc;
+        });
+        return credits;
+    };
+
+    const bestAttempts = pickBestAttemptByCourse(allRows);
+    const chung = computeAvg(bestAttempts);
+    const chungCreditsLearned = computeCredits(bestAttempts);
+    const chungCreditsAccum = computeAccumulatedCredits(bestAttempts);
+
+    const bestAttemptsPassed = bestAttempts.filter(r => {
+        const g = parseFloat(r?.diem);
+        return Number.isFinite(g) && g >= 5;
+    });
+    const chungTichLuy = computeAvg(bestAttemptsPassed);
+
+    let semAvg = null;
+    if (semesterFilter) {
+        const block = sortedScores.find(b => String(b?.name || '') === semesterFilter);
+        const rows = Array.isArray(block?.score) ? block.score : [];
+        semAvg = computeAvg(rows);
+    }
+    if (elements.gradesSummary) {
+        const cards = [];
+        cards.push(`<div class="stc-summary-card"><div class="stc-summary-label">Số tín chỉ đã học (ước tính)</div><div class="stc-summary-value">${Math.round(chungCreditsLearned)}</div><div class="stc-summary-sub">Theo kết quả tốt nhất mỗi môn</div></div>`);
+        cards.push(`<div class="stc-summary-card"><div class="stc-summary-label">Số tín chỉ tích lũy (ước tính)</div><div class="stc-summary-value">${Math.round(chungCreditsAccum)}</div><div class="stc-summary-sub">Chỉ tính môn đạt (≥ 5.0)</div></div>`);
+        cards.push(`<div class="stc-summary-card"><div class="stc-summary-label">Điểm trung bình chung (ước tính)</div><div class="stc-summary-value">${chung.avg === null ? '-' : chung.avg.toFixed(2)}</div><div class="stc-summary-sub">Trọng số theo tín chỉ</div></div>`);
+        cards.push(`<div class="stc-summary-card"><div class="stc-summary-label">Điểm trung bình chung tích lũy (ước tính)</div><div class="stc-summary-value">${chungTichLuy.avg === null ? '-' : chungTichLuy.avg.toFixed(2)}</div><div class="stc-summary-sub">Chỉ tính môn đạt</div></div>`);
+        cards.push(`<div class="stc-summary-card"><div class="stc-summary-label">Trung bình học kỳ (ước tính)</div><div class="stc-summary-value">${!semAvg || semAvg.avg === null ? '-' : semAvg.avg.toFixed(2)}</div><div class="stc-summary-sub">${semesterFilter ? escapeHtml(semesterFilter) : 'Chọn kỳ để xem'}</div></div>`);
+        elements.gradesSummary.innerHTML = cards.join('');
+    }
+
+    const blocks = sortedScores.map((block, blockIdx) => {
+        const title = escapeHtml(block?.name || 'Điểm');
+        const rows = Array.isArray(block?.score) ? block.score : [];
+        if (semesterFilter && String(block?.name || '') !== semesterFilter) return '';
+        const filtered = q
+            ? rows.filter(r => {
+                const hay = `${r?.mamh || ''} ${r?.tenmh || ''} ${r?.malop || ''}`.toLowerCase();
+                return hay.includes(q);
+            })
+            : rows;
+
+        if (!filtered.length) return '';
+
+        const tone = blockIdx % 4;
+        const bodyRows = filtered.map(r => {
+            const mamh = escapeHtml(r?.mamh);
+            const tenmh = escapeHtml(r?.tenmh);
+            const malop = escapeHtml(r?.malop);
+            const sotc = escapeHtml(r?.sotc);
+            const loaimh = escapeHtml(r?.loaimh);
+            const diem = r?.diem === null || r?.diem === undefined ? '' : escapeHtml(r?.diem);
+            const d1 = r?.diem1 === null || r?.diem1 === undefined ? '' : escapeHtml(r?.diem1);
+            const d2 = r?.diem2 === null || r?.diem2 === undefined ? '' : escapeHtml(r?.diem2);
+            const d3 = r?.diem3 === null || r?.diem3 === undefined ? '' : escapeHtml(r?.diem3);
+            const d4 = r?.diem4 === null || r?.diem4 === undefined ? '' : escapeHtml(r?.diem4);
+            const diemClass = gradeFinalCellClass(r?.diem);
+            return `<tr>
+                <td class="stc-gc-mamh">${mamh}</td>
+                <td>${tenmh}</td>
+                <td class="stc-gc-malop">${malop}</td>
+                <td class="num">${sotc}</td>
+                <td><span class="stc-loai-pill">${loaimh}</span></td>
+                <td class="num">${d1}</td>
+                <td class="num">${d2}</td>
+                <td class="num">${d3}</td>
+                <td class="num">${d4}</td>
+                <td class="num strong ${diemClass}">${diem}</td>
+            </tr>`;
+        }).join('');
+
+        return `<div class="stc-grade-block stc-grade-block--t${tone}">
+            <div class="stc-grade-title">${title}</div>
+            <div class="stc-grade-table-wrap">
+                <table class="stc-grade-table">
+                    <thead>
+                        <tr>
+                            <th>Mã</th>
+                            <th>Tên môn</th>
+                            <th>Mã lớp</th>
+                            <th class="num">TC</th>
+                            <th>Loại</th>
+                            <th class="num">1</th>
+                            <th class="num">2</th>
+                            <th class="num">3</th>
+                            <th class="num">4</th>
+                            <th class="num">Tổng</th>
+                        </tr>
+                    </thead>
+                    <tbody>${bodyRows}</tbody>
+                </table>
+            </div>
+        </div>`;
+    }).filter(Boolean).join('');
+
+    elements.gradesContent.innerHTML = blocks || '<div class="empty-state"><h3>Không có kết quả</h3><p>Hãy thử từ khóa khác.</p></div>';
+}
+
+function parseVietnameseDate(text) {
+    const t = String(text || '');
+    let m = /ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(\d{4})/i.exec(t);
+    if (!m) {
+        m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(t);
+    }
+    if (!m) return null;
+    const dd = parseInt(m[1], 10);
+    const mm = parseInt(m[2], 10) - 1;
+    const yy = parseInt(m[3], 10);
+    if (!Number.isFinite(dd) || !Number.isFinite(mm) || !Number.isFinite(yy)) return null;
+    const d = new Date(yy, mm, dd);
+    d.setHours(0, 0, 0, 0);
+    return d;
+}
+
+function parsePeriods(text) {
+    const t = String(text || '');
+    const m = /Tiết\s*([0-9,\s]+)/i.exec(t);
+    if (!m) return [];
+    const raw = m[1]
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+    const out = [];
+    raw.forEach(s => {
+        const n = parseInt(s, 10);
+        if (Number.isFinite(n)) out.push(n);
+    });
+    return Array.from(new Set(out)).filter(n => n >= 1 && n <= 10).sort((a, b) => a - b);
+}
+
+function parseClassCode(text) {
+    const t = String(text || '');
+    const m1 = /(\b[A-Z]{2,}\d{2,3}\.[A-Z]\d{1,3}(?:\.\d+)?\b)/.exec(t);
+    return m1 ? m1[1].toUpperCase() : null;
+}
+
+function parseRoom(text) {
+    const t = String(text || '');
+    const m = /Phòng\s+([A-Z0-9\.]+)/i.exec(t);
+    return m ? m[1] : '';
+}
+
+function normalizeScheduleUpdatesFromNotify(notifyList) {
+    const list = Array.isArray(notifyList) ? notifyList : [];
+    const out = [];
+    list.forEach(n => {
+        const type = String(n?.type || '').trim().toUpperCase();
+        const title = String(n?.title || '');
+        const content = String(n?.content || '');
+        const dated = String(n?.dated || '');
+        const id = String(n?.id || `${type}-${dated}-${title}`); 
+        const code = parseClassCode(title) || parseClassCode(content);
+        const date = parseVietnameseDate(content) || parseVietnameseDate(title);
+        const periodsFromContent = parsePeriods(content);
+        const periods = periodsFromContent.length ? periodsFromContent : parsePeriods(title);
+        const room = type === 'BB' ? parseRoom(content) : '';
+        if (type !== 'BB' && type !== 'BN') return;
+        out.push({
+            id,
+            type,
+            title,
+            content,
+            code,
+            date,
+            periods,
+            room,
+            dated,
+        });
+    });
+    out.sort((a, b) => {
+        const ta = a.date ? a.date.getTime() : 0;
+        const tb = b.date ? b.date.getTime() : 0;
+        if (tb !== ta) return tb - ta;
+        return String(b.dated || '').localeCompare(String(a.dated || ''));
+    });
+    return out;
+}
+
+function getCurrentSemesterCoursePrefixes() {
+    const currentSemester = Array.isArray(appState.semesters) && appState.semesters.length ? appState.semesters[0] : null;
+    if (!currentSemester) return new Set();
+    const prefixes = new Set();
+    const currentCourses = (appState.courses || []).filter(course => {
+        const semId = appState.courseSemMap.get(course.id);
+        return semId === currentSemester.id;
+    });
+    currentCourses.forEach(c => {
+        const s = `${c.shortname || ''} ${c.fullname || ''}`.toUpperCase();
+        const m = /(\b[A-Z]{2,}\d{2,3}\b)/.exec(s);
+        if (m) prefixes.add(m[1]);
+    });
+    return prefixes;
+}
+
+function getCurrentSemesterCourseCores() {
+    const currentSemester = Array.isArray(appState.semesters) && appState.semesters.length ? appState.semesters[0] : null;
+    if (!currentSemester) return new Set();
+    const cores = new Set();
+    const currentCourses = (appState.courses || []).filter(course => {
+        const semId = appState.courseSemMap.get(course.id);
+        return semId === currentSemester.id;
+    });
+    currentCourses.forEach(c => {
+        const s = `${c.shortname || ''} ${c.fullname || ''}`.toUpperCase();
+        const m = /(\b[A-Z]{2,}\d{2,3}\.[A-Z]\d{2,3}\b)/.exec(s);
+        if (m) cores.add(m[1]);
+    });
+    return cores;
+}
+
+function populateScheduleUpdatesCourseFilter() {
+    if (!elements.scheduleUpdatesCourse) return;
+    const coresAllowed = getCurrentSemesterCourseCores();
+    const all = Array.isArray(appState.scheduleOverrides) ? appState.scheduleOverrides : [];
+    const codes = Array.from(new Set(all
+        .filter(it => it.code)
+        .map(it => String(it.code).toUpperCase())
+        .filter(code => {
+            const core = code.split('.').slice(0, 2).join('.');
+            return coresAllowed.size === 0 ? true : coresAllowed.has(core);
+        })
+        .map(code => code.split('.').slice(0, 2).join('.'))
+    )).sort((a, b) => a.localeCompare(b));
+
+    const currentValue = elements.scheduleUpdatesCourse.value;
+    const options = ['<option value="">Tất cả môn (kỳ hiện tại)</option>']
+        .concat(codes.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`));
+    elements.scheduleUpdatesCourse.innerHTML = options.join('');
+    elements.scheduleUpdatesCourse.value = codes.includes(currentValue) ? currentValue : '';
+}
+
+function renderScheduleUpdates() {
+    if (!elements.scheduleUpdatesList) return;
+    const all = Array.isArray(appState.scheduleOverrides) ? appState.scheduleOverrides : [];
+    const q = String(elements.scheduleUpdatesSearch?.value || '').trim().toLowerCase();
+    const typeFilter = String(elements.scheduleUpdatesType?.value || '').trim();
+    const courseFilter = String(elements.scheduleUpdatesCourse?.value || '').trim().toUpperCase();
+    const sortMode = String(elements.scheduleUpdatesSort?.value || 'event_asc');
+    const rangeMode = String(elements.scheduleUpdatesRange?.value || 'active');
+    const coresAllowed = getCurrentSemesterCourseCores();
+
+    let filtered = all.filter(it => {
+        if (typeFilter && it.type !== typeFilter) return false;
+        if (it.code) {
+            const core = String(it.code).toUpperCase().split('.').slice(0, 2).join('.');
+            if (coresAllowed.size && !coresAllowed.has(core)) return false;
+        } else if (coresAllowed.size) {
+            return false;
+        }
+        if (courseFilter) {
+            const core = String(it.code).toUpperCase().split('.').slice(0, 2).join('.');
+            if (core !== courseFilter) return false;
+        }
+        if (!q) return true;
+        const hay = `${it.code || ''} ${it.title || ''} ${it.content || ''}`.toLowerCase();
+        return hay.includes(q);
+    });
+
+    if (rangeMode === 'active') {
+        filtered = filtered.filter(it => !isScheduleItemPast(it));
+    } else if (rangeMode === 'archive') {
+        filtered = filtered.filter(it => isScheduleItemPast(it));
+    }
+
+    filtered.sort((a, b) => {
+        if (sortMode === 'event_asc') return sortKeyEventMs(a) - sortKeyEventMs(b);
+        if (sortMode === 'event_desc') return sortKeyEventMs(b) - sortKeyEventMs(a);
+        if (sortMode === 'posted_new') return notifyPostedMs(b) - notifyPostedMs(a);
+        if (sortMode === 'posted_old') return notifyPostedMs(a) - notifyPostedMs(b);
+        return sortKeyEventMs(a) - sortKeyEventMs(b);
+    });
+
+    if (!filtered.length) {
+        const hint = !all.length
+            ? '<p>Hãy đăng nhập và làm mới để tải lịch nghỉ/bù.</p>'
+            : rangeMode === 'active'
+                ? '<p>Không có buổi nghỉ/bù chưa diễn ra. Chọn «Tất cả» hoặc «Đã qua» để xem lịch cũ.</p>'
+                : rangeMode === 'archive'
+                    ? '<p>Không có mục đã qua trong bộ lọc hiện tại.</p>'
+                    : '<p>Thử đổi bộ lọc hoặc từ khóa tìm kiếm.</p>';
+        elements.scheduleUpdatesList.innerHTML = `<div class="empty-state"><h3>Chưa có dữ liệu</h3>${hint}</div>`;
+        return;
+    }
+
+    const getAccentFromCode = (code) => {
+        const colorSettings = window.__courseColors || appState.courseColors || {};
+        const core = String(code || '').toUpperCase().split('.').slice(0, 2).join('.');
+        const fromSettings = core && colorSettings[core] ? colorSettings[core] : (code && colorSettings[String(code).toUpperCase()] ? colorSettings[String(code).toUpperCase()] : null);
+        if (fromSettings?.bg) {
+            return { bg: fromSettings.bg, border: fromSettings.border || fromSettings.bg };
+        }
+        const s = core || String(code || '');
+        let h = 0;
+        for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+        const hue = h % 360;
+        return {
+            bg: `hsla(${hue}, 85%, 90%, 0.95)`,
+            border: `hsla(${hue}, 70%, 55%, 0.45)`,
+            accent: `hsl(${hue}, 70%, 45%)`,
+        };
+    };
+
+    elements.scheduleUpdatesList.innerHTML = filtered.map(it => {
+        const dateLabel = it.date ? it.date.toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+        const core = String(it.code || '').toUpperCase().split('.').slice(0, 2).join('.');
+        const acc = getAccentFromCode(core || it.code);
+        const styleVars = `--stc-bg:${acc.bg};--stc-border:${acc.border};--stc-accent:${acc.accent || 'var(--uit-accent)'}`;
+        const typeLabel = it.type === 'BN' ? 'Nghỉ' : 'Bù';
+        const typeTone = it.type === 'BN' ? 'danger' : 'info';
+        const periods = it.periods && it.periods.length ? `Tiết ${it.periods.join(',')}` : '';
+        const room = it.room ? `P. ${it.room}` : '';
+        const startDt = scheduleItemStartDate(it);
+        const cd = startDt ? formatScheduleCountdown(startDt.getTime()) : { text: '—', tone: 'muted' };
+        const cdClass = cd.tone === 'urgent' ? 'stc-countdown-urgent' : cd.tone === 'soon' ? 'stc-countdown-soon' : cd.tone === 'muted' ? 'stc-countdown-muted' : 'stc-countdown-calm';
+        const chips = [
+            `<span class="stc-chip ${typeTone}">${escapeHtml(typeLabel)}</span>`,
+            core ? `<span class="stc-chip stc-chip-mono">${escapeHtml(core)}</span>` : '',
+            dateLabel ? `<span class="stc-chip">${escapeHtml(dateLabel)}</span>` : '',
+            periods ? `<span class="stc-chip">${escapeHtml(periods)}</span>` : '',
+            room ? `<span class="stc-chip stc-chip-room">${escapeHtml(room)}</span>` : '',
+        ].filter(Boolean).join('');
+
+        const title = formatScheduleItemDisplayTitle(it);
+        return `<div class="stc-item stc-item-colored" data-type="${escapeHtml(it.type)}" style="${styleVars}">
+            <div class="stc-item-row">
+                <div class="stc-item-main">
+                    <div class="stc-item-title">${escapeHtml(title)}</div>
+                    <div class="stc-item-chips">${chips}</div>
+                </div>
+                <div class="stc-item-aside">
+                    <div class="stc-countdown-label">Đếm ngược</div>
+                    <div class="stc-countdown-value ${cdClass}">${escapeHtml(cd.text)}</div>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function initWeek(refDate) {
+    const d = new Date(refDate);
+    // Set week start to Monday
+    const day = d.getDay(); // 0=Sun
+    const diff = (day === 0 ? -6 : 1 - day); // days to Monday
+    const monday = new Date(d);
+    monday.setDate(d.getDate() + diff);
+    monday.setHours(0,0,0,0);
+    appState.timetableWeekStart = monday;
+    if (elements.ttWeekLabel) {
+        const end = new Date(monday); end.setDate(monday.getDate()+4);
+        const fmt = (dt) => dt.toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit'});
+        elements.ttWeekLabel.textContent = `Tuần hiện tại: ${fmt(monday)} - ${fmt(end)}`;
+    }
+}
+function shiftWeek(deltaDays) { initWeek(new Date(appState.timetableWeekStart.getTime() + deltaDays*86400000)); renderTimetable(); }
+
+// Lightweight ICS parser for VEVENT DTSTART/DTEND/SUMMARY/LOCATION and WEEKLY RRULE BYDAY
+function parseIcsToEvents() {
+    appState.timetableEvents = [];
+    if (!appState.icsRaw) return;
+    const lines = appState.icsRaw.split(/\r?\n/);
+    let current = null;
+    const events = [];
+    for (const ln of lines) {
+        if (ln.startsWith('BEGIN:VEVENT')) current = {};
+        else if (ln.startsWith('END:VEVENT')) { if (current) { events.push(current); current=null; } }
+        else if (current) {
+            const [k, ...rest] = ln.split(':');
+            const v = rest.join(':');
+            if (k.startsWith('DTSTART')) current.DTSTART = v;
+            else if (k.startsWith('DTEND')) current.DTEND = v;
+            else if (k === 'SUMMARY') current.SUMMARY = v;
+            else if (k === 'LOCATION') current.LOCATION = v;
+            else if (k === 'DESCRIPTION') current.DESCRIPTION = v;
+            else if (k.startsWith('RRULE')) current.RRULE = v;
+        }
+    }
+    // Normalize
+    const toDate = (val) => {
+        // formats like 20250115T070000Z or local 20250115T070000
+        if (!val) return null;
+        const tzZ = val.endsWith('Z');
+        const y = parseInt(val.slice(0,4),10);
+        const m = parseInt(val.slice(4,6),10)-1;
+        const d = parseInt(val.slice(6,8),10);
+        const hh = parseInt(val.slice(9,11),10);
+        const mm = parseInt(val.slice(11,13),10);
+        const ss = parseInt(val.slice(13,15)||'0',10);
+        return tzZ ? new Date(Date.UTC(y,m,d,hh,mm,ss)) : new Date(y,m,d,hh,mm,ss);
+    };
+    const toDayStart = (dt) => { if (!dt) return null; const d = new Date(dt); d.setHours(0,0,0,0); return d; };
+    const dayMap = { MO:1, TU:2, WE:3, TH:4, FR:5, SA:6, SU:0 };
+    for (const e of events) {
+        const start = toDate(e.DTSTART);
+        const end = toDate(e.DTEND);
+        if (!start || !end) continue;
+        let bydays = [];
+        let until = null;
+        let interval = 1;
+        if (e.RRULE) {
+            const m = /BYDAY=([^;]+)/.exec(e.RRULE);
+            if (m) bydays = m[1].split(',').map(s=>s.trim());
+            const mu = /UNTIL=([0-9TZ]+)/.exec(e.RRULE);
+            if (mu) until = toDate(mu[1]);
+            const mi = /INTERVAL=(\d+)/.exec(e.RRULE);
+            if (mi) interval = Math.max(1, parseInt(mi[1],10) || 1);
+        }
+        // Parse course information from SUMMARY and DESCRIPTION
+        const summary = (e.SUMMARY||'').trim();
+        const desc = (e.DESCRIPTION||'').trim();
+        
+    // Extract course code (e.g., CS117.Q11, SE115.Q11)
+    const codeMatch = /(\b[A-Z]{2,}\d{2,3}\.[A-Z]\d{2}\b)/.exec(summary) || /(\b[A-Z]{2,}\d{2,3}\.[A-Z]\d{2}\b)/.exec(desc);
+    const code = codeMatch ? codeMatch[1] : null;
+        
+        // Extract course name from DESCRIPTION (in parentheses)
+        let courseName = '';
+        const nameInDesc = /\(([^)]+)\)/.exec(desc);
+        if (nameInDesc) courseName = nameInDesc[1];
+        
+        // If no course name from description, try to extract from summary
+        if (!courseName && code) {
+            const afterCode = new RegExp(code.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+"[\s-:]+([^\-]+)").exec(summary);
+            if (afterCode && afterCode[1]) courseName = afterCode[1].trim();
+        }
+        
+        // Extract period information from DESCRIPTION (e.g., "Tiết 123", "Tiết 90", "Tiết 10")
+        // Rules (the school's .ics export is inconsistent):
+        //  - A continuous string means consecutive periods ("123" -> 1,2,3 ; "678" -> 6,7,8)
+        //  - "0" alone or the substring "10" represents period 10
+        //  - A trailing 0 (e.g. "90") means the last period is 10 (=> 9,10)
+        //  - We also handle patterns like "910" => 9,10; "10" => 10
+        let periods = [];
+        const periodMatch = /Tiết\s*(\d+)/i.exec(desc);
+        if (periodMatch) {
+            const raw = periodMatch[1];
+            const expandPeriods = (str) => {
+                const result = [];
+                let i = 0;
+                while (i < str.length) {
+                    // Look ahead for "10" first
+                    if (str[i] === '1' && str[i+1] === '0') {
+                        result.push(10); i += 2; continue;
+                    }
+                    if (str[i] === '0') { // standalone 0 means 10
+                        result.push(10); i += 1; continue;
+                    }
+                    const n = parseInt(str[i], 10);
+                    if (!isNaN(n) && n > 0 && n <= 9) result.push(n);
+                    i += 1;
+                }
+                // If it looks like a consecutive run (e.g. 1,2,3) keep; otherwise just return as parsed
+                return result;
+            };
+            const expanded = expandPeriods(raw);
+            // If we got something like [1,10] from "10" we should collapse to just [10]
+            if (expanded.length === 2 && expanded[0] === 1 && expanded[1] === 10 && raw === '10') {
+                periods = [10];
+            } else {
+                periods = expanded;
+            }
+        }
+        
+        // Use official course name if available
+        let officialName = '';
+        if (code && Array.isArray(appState.courses) && appState.courses.length) {
+            const found = appState.courses.find(c => typeof c.shortname === 'string' && c.shortname.toUpperCase().includes(code.split('.')[0]));
+            if (found && found.fullname) officialName = found.fullname;
+        }
+        
+    const title = officialName || (courseName ? `${code ? code + ' - ' : ''}${courseName}` : summary);
+
+    // Instructor name (Vietnamese: "Giảng viên: <name>")
+    let instructor = '';
+    const gvMatch = /Giảng viên:\s*([^,\n]+)/i.exec(desc);
+    if (gvMatch) instructor = gvMatch[1].trim();
+        
+        // Extract room location
+        let loc = (e.LOCATION||'').trim();
+        if (!loc) {
+            const m1 = /P\.?\s*([A-Z0-9\.\-]+)/i.exec(summary);
+            const m2 = /P\.?\s*([A-Z0-9\.\-]+)/i.exec(desc);
+            if (m1 && m1[1]) loc = m1[1];
+            else if (m2 && m2[1]) loc = m2[1];
+        }
+        // Create events based on periods from DESCRIPTION
+        if (periods.length > 0) {
+            const periodTimes = {
+                1: { start: 7*60+30, end: 8*60+15 },
+                2: { start: 8*60+15, end: 9*60+0 },
+                3: { start: 9*60+0, end: 9*60+45 },
+                4: { start: 10*60+0, end: 10*60+45 },
+                5: { start: 10*60+45, end: 11*60+30 },
+                6: { start: 13*60+0, end: 13*60+45 },
+                7: { start: 13*60+45, end: 14*60+30 },
+                8: { start: 14*60+30, end: 15*60+15 },
+                9: { start: 15*60+30, end: 16*60+15 },
+                10: { start: 16*60+15, end: 17*60+0 }
+            };
+            
+            // Calculate start and end times based on periods
+            const sortedPeriods = periods.sort((a, b) => a - b);
+            const firstPeriod = sortedPeriods[0];
+            const lastPeriod = sortedPeriods[sortedPeriods.length - 1];
+            
+            const startMin = periodTimes[firstPeriod] ? periodTimes[firstPeriod].start : start.getHours()*60+start.getMinutes();
+            const endMin = periodTimes[lastPeriod] ? periodTimes[lastPeriod].end : end.getHours()*60+end.getMinutes();
+            
+            if (bydays.length === 0) {
+                // Single instance -> map to that weekday
+                const dow = start.getDay();
+                appState.timetableEvents.push({
+                    dow,
+                    startMin,
+                    endMin,
+                    title,
+                    location: loc,
+                    start,
+                    end,
+                    single: true,
+                    termStart: toDayStart(start),
+                    until: toDayStart(end),
+                    interval: 1,
+                    periods: sortedPeriods,
+                    code,
+                    instructor
+                });
+            } else {
+                for (const dcode of bydays) {
+                    const dow = dayMap[dcode];
+                    if (dow === undefined) continue;
+                    appState.timetableEvents.push({
+                        dow,
+                        startMin,
+                        endMin,
+                        title,
+                        location: loc,
+                        start,
+                        end,
+                        single: false,
+                        termStart: toDayStart(start),
+                        until: toDayStart(until),
+                        interval,
+                        periods: sortedPeriods,
+                        code,
+                        instructor
+                    });
+                }
+            }
+        } else {
+            // Fallback to original logic if no periods found
+            if (bydays.length === 0) {
+                const dow = start.getDay();
+                appState.timetableEvents.push({
+                    dow,
+                    startMin: start.getHours()*60+start.getMinutes(),
+                    endMin: end.getHours()*60+end.getMinutes(),
+                    title,
+                    location: loc,
+                    start,
+                    end,
+                    single: true,
+                    termStart: toDayStart(start),
+                    until: toDayStart(end),
+                    interval: 1,
+                    code,
+                    instructor
+                });
+            } else {
+                for (const dcode of bydays) {
+                    const dow = dayMap[dcode];
+                    if (dow === undefined) continue;
+                    appState.timetableEvents.push({
+                        dow,
+                        startMin: start.getHours()*60+start.getMinutes(),
+                        endMin: end.getHours()*60+end.getMinutes(),
+                        title,
+                        location: loc,
+                        start,
+                        end,
+                        single: false,
+                        termStart: toDayStart(start),
+                        until: toDayStart(until),
+                        interval,
+                        code,
+                        instructor
+                    });
+                }
+            }
+        }
+    }
+    // Toggle guide visibility
+    if (elements.timetableGuide) {
+        if (appState.timetableEvents.length > 0) elements.timetableGuide.classList.add('hidden');
+        else elements.timetableGuide.classList.remove('hidden');
+    }
+}
+
+function renderTimetable() {
+    if (!elements.timetableGrid || !appState.timetableWeekStart) return;
+    const weekStart = appState.timetableWeekStart;
+    const days = [1,2,3,4,5,6]; // Mon-Sat
+    const timeSlots = [
+        { label: 'Tiết 1', time: '7:30 - 8:15' },
+        { label: 'Tiết 2', time: '8:15 - 9:00' },
+        { label: 'Tiết 3', time: '9:00 - 9:45' },
+        { label: 'Tiết 4', time: '10:00 - 10:45' },
+        { label: 'Tiết 5', time: '10:45 - 11:30' },
+        { label: 'Tiết 6', time: '13:00 - 13:45' },
+        { label: 'Tiết 7', time: '13:45 - 14:30' },
+        { label: 'Tiết 8', time: '14:30 - 15:15' },
+        { label: 'Tiết 9', time: '15:30 - 16:15' },
+        { label: 'Tiết 10', time: '16:15 - 17:00' }
+    ];
+
+    const today = new Date(); today.setHours(0,0,0,0);
+    // Build grid container
+    let html = '<div class="tt-grid">';
+    // First row: empty top-left cell then day headers
+    html += '<div class="tt-corner tt-header">Thứ / Tiết</div>';
+    for (const d of days) {
+        const dt = new Date(weekStart); dt.setDate(weekStart.getDate()+d-1);
+        const isToday = dt.getTime() === today.getTime();
+        const label = dt.toLocaleDateString('vi-VN', { weekday:'short', day:'2-digit', month:'2-digit'});
+        html += `<div class="tt-day-header${isToday ? ' today' : ''}">${label}</div>`;
+    }
+    // Time labels + empty cells with explicit coordinates
+    // Grid coordinates: row 1 = header row. Period rows start at 2.
+    for (let r = 0; r < timeSlots.length; r++) {
+        const slot = timeSlots[r];
+        const gridRow = r + 2; // because row 1 is headers
+        html += `<div class=\"tt-time\" style=\"grid-column:1;grid-row:${gridRow};\"><strong>${slot.label}</strong><small>${slot.time}</small></div>`;
+        for (let c = 0; c < days.length; c++) {
+            const gridCol = c + 2; // column 1 is time column
+            html += `<div class=\"tt-cell\" style=\"grid-column:${gridCol};grid-row:${gridRow};\"></div>`;
+        }
+    }
+    const sameDayLocal = (a, b) => a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 5); weekEnd.setHours(23, 59, 59, 999);
+
+    const baseItems = [];
+    for (const ev of appState.timetableEvents) {
+        if (!days.includes(ev.dow)) continue;
+        const dayDate = new Date(weekStart); dayDate.setDate(weekStart.getDate() + ev.dow - 1); dayDate.setHours(0, 0, 0, 0);
+        if (!isEventActiveOnDate(ev, dayDate)) continue;
+        let pStart, pEnd;
+        if (ev.periods && ev.periods.length) {
+            pStart = ev.periods[0];
+            pEnd = ev.periods[ev.periods.length - 1];
+        } else {
+            const map = [
+                [450, 495], [495, 540], [540, 585], [600, 645], [645, 690],
+                [780, 825], [825, 870], [870, 915], [930, 975], [975, 1020],
+            ];
+            const findIdx = (m) => map.findIndex(([s, e]) => m >= s && m < e) + 1;
+            pStart = findIdx(ev.startMin) || 1;
+            pEnd = findIdx(ev.endMin - 1) || pStart;
+        }
+        const col = days.indexOf(ev.dow) + 2;
+        const rowStart = 2 + (pStart - 1);
+        const rowEnd = rowStart + (pEnd - pStart + 1);
+        baseItems.push({ ev, dayDate, col, rowStart, rowEnd, pStart, pEnd });
+    }
+
+    const overrides = Array.isArray(appState.scheduleOverrides) ? appState.scheduleOverrides : [];
+    const cancels = overrides.filter(o => o.type === 'BN' && o.code && o.date && o.date >= weekStart && o.date <= weekEnd);
+    const makeups = overrides.filter(o => o.type === 'BB' && o.code && o.date && o.date >= weekStart && o.date <= weekEnd);
+
+    const cancelledKeys = new Set(
+        cancels.map(c => `${c.code}::${c.date.getFullYear()}-${c.date.getMonth()}-${c.date.getDate()}`)
+    );
+
+    const items = baseItems.filter(it => {
+        if (!it.ev?.code || !it.dayDate) return true;
+        const key = `${String(it.ev.code).toUpperCase()}::${it.dayDate.getFullYear()}-${it.dayDate.getMonth()}-${it.dayDate.getDate()}`;
+        return !cancelledKeys.has(key);
+    });
+
+    makeups.forEach(m => {
+        const d = m.date;
+        if (!d) return;
+        const jsDow = d.getDay();
+        if (!days.includes(jsDow)) return;
+        const periods = Array.isArray(m.periods) ? m.periods : [];
+        if (!periods.length) return;
+        const pStart = periods[0];
+        const pEnd = periods[periods.length - 1];
+        const col = days.indexOf(jsDow) + 2;
+        const rowStart = 2 + (pStart - 1);
+        const rowEnd = rowStart + (pEnd - pStart + 1);
+        const ev = {
+            dow: jsDow,
+            periods,
+            code: m.code,
+            title: m.code,
+            location: m.room || '',
+            instructor: '',
+            single: true,
+            termStart: d,
+            until: d,
+            interval: 1,
+            source: 'override',
+            kind: 'makeup',
+        };
+        items.push({ ev, dayDate: d, col, rowStart, rowEnd, pStart, pEnd, isMakeup: true });
+    });
+
+    const byCol = new Map();
+    items.forEach(it => {
+        if (!byCol.has(it.col)) byCol.set(it.col, []);
+        byCol.get(it.col).push(it);
+    });
+
+    const groups = [];
+    Array.from(byCol.entries()).forEach(([col, list]) => {
+        list.sort((a, b) => a.rowStart - b.rowStart);
+        let current = null;
+        list.forEach(it => {
+            if (!current) {
+                current = { col, rowStart: it.rowStart, rowEnd: it.rowEnd, items: [it] };
+                return;
+            }
+            const overlap = it.rowStart < current.rowEnd && it.rowEnd > current.rowStart;
+            if (overlap) {
+                current.items.push(it);
+                current.rowStart = Math.min(current.rowStart, it.rowStart);
+                current.rowEnd = Math.max(current.rowEnd, it.rowEnd);
+            } else {
+                groups.push(current);
+                current = { col, rowStart: it.rowStart, rowEnd: it.rowEnd, items: [it] };
+            }
+        });
+        if (current) groups.push(current);
+    });
+
+    const buildEventInner = (ev) => {
+        const roomLabel = ev.location ? (String(ev.location).startsWith('P.') ? ev.location : `P. ${ev.location}`) : '';
+        const code = ev.code || ev.title || 'Môn học';
+        const colorSettings = window.__courseColors || appState.courseColors || {};
+        const key = String(code || '').toUpperCase();
+        const clr = key && colorSettings[key] ? colorSettings[key] : null;
+        const styleVars = clr ? `--ev-bg:${clr.bg};--ev-border:${clr.border || clr.bg};--ev-accent:${clr.accent || clr.bg}` : '';
+        return `<div class="tt-event-inner" data-color style="${styleVars}">` +
+            `<div class="tt-event-code">${escapeHtml(code)}</div>` +
+            `<div class="tt-event-room">${escapeHtml(roomLabel)}</div>` +
+            `</div>`;
+    };
+
+    groups.forEach(g => {
+        const rowStart = g.rowStart;
+        const rowEnd = g.rowEnd;
+        const col = g.col;
+        const clickableCode = g.items.find(x => x.ev && x.ev.code)?.ev?.code;
+        const onclick = clickableCode ? ` onclick="openCourseByCode('${String(clickableCode).replace(/'/g, "\\'")}')"` : '';
+        if (g.items.length === 1) {
+            const it = g.items[0];
+            html += `<div class="tt-event" style="grid-column:${col};grid-row:${rowStart}/${rowEnd};"${onclick}>` +
+                buildEventInner(it.ev) +
+                `</div>`;
+        } else {
+            const primary = g.items[0];
+            const hiddenCount = Math.max(0, g.items.length - 1);
+            const moreBadge = hiddenCount ? `<div class="tt-stack-more">+${hiddenCount}</div>` : '';
+            html += `<div class="tt-event tt-event-stack" style="grid-column:${col};grid-row:${rowStart}/${rowEnd};"${onclick}>` +
+                moreBadge +
+                buildEventInner(primary.ev) +
+                `</div>`;
+        }
+    });
+    html += '</div>';
+    elements.timetableGrid.innerHTML = html;
+    highlightCurrentTimetableState();
+    attachCourseColorPickers();
+}
+
+// Highlight current period cell and ongoing event
+function highlightCurrentTimetableState() {
+    try {
+        const container = elements.timetableGrid.querySelector('.tt-grid');
+        if (!container) return;
+        const now = new Date();
+        const minutes = now.getHours()*60 + now.getMinutes();
+        const periodBounds = [
+            [450,495],[495,540],[540,585],[600,645],[645,690],
+            [780,825],[825,870],[870,915],[930,975],[975,1020]
+        ];
+        let currentPeriod = null;
+        periodBounds.forEach((b,i)=>{ if (minutes >= b[0] && minutes < b[1]) currentPeriod = i+1; });
+
+        // Compute today's column in the grid (Mon=1..Sat=6, grid columns start at 2)
+        const jsDow = now.getDay(); // Sun=0..Sat=6
+        const dowMonBased = ((jsDow + 6) % 7) + 1; // Mon=1..Sun=7
+        const todayCol = (dowMonBased >= 1 && dowMonBased <= 6) ? (dowMonBased + 1) : null; // +1 for time column
+
+        // Clear previous
+        container.querySelectorAll('.tt-time').forEach(el=>el.classList.remove('current-period'));
+        container.querySelectorAll('.tt-event').forEach(el=>el.classList.remove('current'));
+
+        if (currentPeriod) {
+            const row = currentPeriod + 1; // +1 header
+            // Find time cell for that row
+            const timeCell = Array.from(container.querySelectorAll('.tt-time')).find(c => c.style.gridRow == row);
+            if (timeCell) timeCell.classList.add('current-period');
+
+            if (todayCol) {
+                // Find the specific event that is currently ongoing in today's column only
+                const events = container.querySelectorAll('.tt-event');
+                let foundCurrentEvent = false;
+
+                events.forEach(ev => {
+                    if (foundCurrentEvent) return;
+                    const styleAttr = ev.getAttribute('style') || '';
+                    // style contains: grid-column:X;grid-row:RS/RE;
+                    const cm = /grid-column:\s*(\d+)/.exec(styleAttr);
+                    const rm = /grid-row:\s*(\d+)\s*\/\s*(\d+)/.exec(styleAttr);
+                    if (cm && rm) {
+                        const col = parseInt(cm[1], 10);
+                        const rs = parseInt(rm[1], 10);
+                        const re = parseInt(rm[2], 10);
+                        const pIndex = currentPeriod + 1; // row index inside grid
+                        if (col === todayCol && pIndex >= rs && pIndex < re) {
+                            ev.classList.add('current');
+                            foundCurrentEvent = true;
+                        }
+                    }
+                });
+            }
+        }
+    } catch(e) { console.warn('Highlight timetable failed', e); }
+}
+
+// Periodic updater
+setInterval(()=>highlightCurrentTimetableState(), 60*1000);
+
+// Public helper to set course color (can be wired to future UI form)
+async function setCourseColor(code, bgColor) {
+    if (!code || !bgColor) return;
+    const norm = code.trim().toUpperCase();
+    appState.courseColors[norm] = { bg: bgColor };
+    window.__courseColors = appState.courseColors;
+    try {
+        await window.electronAPI.setSetting('courseColors', appState.courseColors);
+    } catch(e) { console.warn('Persist course color failed', e); }
+    renderTimetable();
+}
+
+// COURSE COLOR PICKER UI ----------------------------------
+let currentColorPickCode = null;
+function openCourseColorModal(code) {
+    if (!elements.courseColorModal) return;
+    currentColorPickCode = code;
+    const current = appState.courseColors[code] || {}; 
+    const defColor = current.bg || '#b5f5e9';
+    if (elements.courseColorInput) elements.courseColorInput.value = rgbToHex(defColor) || '#b5f5e9';
+    if (elements.courseColorPreview) elements.courseColorPreview.style.background = defColor;
+    if (elements.courseColorMeta) elements.courseColorMeta.textContent = code;
+    elements.courseColorModal.classList.remove('hidden');
+}
+function closeCourseColorModal() {
+    if (elements.courseColorModal) elements.courseColorModal.classList.add('hidden');
+}
+function attachCourseColorPickers() {
+    // timetable events
+    if (!elements.timetableGrid) return;
+    elements.timetableGrid.querySelectorAll('.tt-event').forEach(div => {
+        if (div.__colorBound) return; div.__colorBound = true;
+        div.addEventListener('dblclick', () => {
+            const codeEl = div.querySelector('.tt-event-code');
+            const code = codeEl ? codeEl.textContent.trim() : null;
+            if (code) openCourseColorModal(code);
+        });
+        // Single click opens course details by code
+        div.addEventListener('click', (e) => {
+            // Prevent interfering with double-click color picker: small delay guard
+            if (div.__dblClickTimeout) return;
+            div.__dblClickTimeout = setTimeout(() => { delete div.__dblClickTimeout; }, 250);
+            const codeEl = div.querySelector('.tt-event-code');
+            const code = codeEl ? codeEl.textContent.trim() : null;
+            if (code) openCourseByCode(code);
+        });
+    });
+    // course list items coloring (applied each render assign tasks etc). We add class & style
+    applyCourseColorsToLists();
+}
+
+// Open course details by code referenced in timetable
+function openCourseByCode(code) {
+    if (!code) return;
+    const norm = code.trim().toUpperCase();
+    // Try exact match first: by shortname startswith or includes
+    let course = appState.courses.find(c => String(c.shortname||'').toUpperCase().includes(norm));
+    if (!course) {
+        // Fallback: try fullname contains code segment before '.'
+        const core = norm.split('.')[0];
+        course = appState.courses.find(c => String(c.fullname||'').toUpperCase().includes(core));
+    }
+    if (course) {
+        openCourseDetails(course.id);
+        return;
+    }
+    showNotification('Không tìm thấy môn tương ứng', 'warning');
+}
+
+function applyCourseColorsToLists() {
+    try {
+        const colorMap = appState.courseColors || {};
+        const lists = [elements.coursesList, elements.semesterCoursesList, elements.generalCoursesList];
+        lists.forEach(list => {
+            if (!list) return;
+            list.querySelectorAll('[data-course-shortname]').forEach(li => {
+                const sn = li.getAttribute('data-course-shortname');
+                // Try to match color by code prefix (before '-')
+                const code = Object.keys(colorMap).find(c => sn && sn.toUpperCase().includes(c.split('.')[0]));
+                if (code) {
+                    li.classList.add('course-colored');
+                    li.style.setProperty('--course-color', colorMap[code].bg);
+                }
+            });
+        });
+    } catch(e) {}
+}
+
+// Helper: convert rgb/rgba or hex to hex  (#rrggbb)
+function rgbToHex(color) {
+    if (!color) return null;
+    if (color.startsWith('#')) return color.length === 4 ? '#' + color.slice(1).split('').map(c=>c+c).join('') : color;
+    const m = /rgba?\((\d+),(\d+),(\d+)/.exec(color.replace(/\s+/g,''));
+    if (!m) return '#b5f5e9';
+    const toHex = n => ('0'+parseInt(n,10).toString(16)).slice(-2);
+    return '#' + toHex(m[1]) + toHex(m[2]) + toHex(m[3]);
+}
+
+// Bind modal buttons (only once after DOM ready)
+document.addEventListener('DOMContentLoaded', () => {
+    if (elements.courseColorInput) {
+        elements.courseColorInput.addEventListener('input', () => {
+            const val = elements.courseColorInput.value;
+            if (elements.courseColorPreview) elements.courseColorPreview.style.background = val;
+        });
+    }
+    if (elements.saveCourseColor) {
+        elements.saveCourseColor.onclick = async () => {
+            if (currentColorPickCode && elements.courseColorInput) {
+                await setCourseColor(currentColorPickCode, elements.courseColorInput.value);
+            }
+            closeCourseColorModal();
+        };
+    }
+    if (elements.resetCourseColor) {
+        elements.resetCourseColor.onclick = async () => {
+            if (currentColorPickCode) {
+                delete appState.courseColors[currentColorPickCode];
+                await window.electronAPI.setSetting('courseColors', appState.courseColors);
+                window.__courseColors = appState.courseColors;
+                renderTimetable();
+                applyCourseColorsToLists();
+            }
+        };
+    }
+    if (elements.closeCourseColor) {
+        elements.closeCourseColor.onclick = () => closeCourseColorModal();
+    }
+    if (elements.courseColorModal) {
+        elements.courseColorModal.addEventListener('click', (e) => { if (e.target === elements.courseColorModal) closeCourseColorModal(); });
+    }
+});
+
+function isEventActiveOnDate(event, date) {
+    if (event.single) {
+        return event.termStart && sameDay(event.termStart, date);
+    }
+    // recurring weekly
+    if (event.termStart && date < event.termStart) return false;
+    if (event.until && date > event.until) return false;
+    const diffDays = Math.floor((date - event.termStart) / 86400000);
+    const diffWeeks = Math.floor(diffDays / 7);
+    return (diffWeeks % (event.interval || 1)) === 0;
+}
+
+
+function sameDay(a, b) {
+    return a.getFullYear() === b.getFullYear() && 
+           a.getMonth() === b.getMonth() && 
+           a.getDate() === b.getDate();
+}
+
+
+// Form switching functions
+function switchToLoginForm() {
+    elements.newUserForm.classList.add('hidden');
+    elements.existingUserForm.classList.remove('hidden');
+}
+
+function switchToRegisterForm() {
+    elements.existingUserForm.classList.add('hidden');
+    elements.newUserForm.classList.remove('hidden');
+}
+
+// Load assignments for current semester only
+async function loadAssignmentsForCurrentSemester() {
+    try {
+        appState.assignments = [];
+        
+        // Get current semester (latest one)
+        const currentSemester = appState.semesters.length > 0 ? appState.semesters[0] : null;
+        if (!currentSemester) {
+            console.log('No current semester found');
+            return;
+        }
+        
+        // Get courses for current semester
+        const currentSemesterCourses = appState.courses.filter(course => {
+            const courseSemId = appState.courseSemMap.get(course.id);
+            return courseSemId === currentSemester.id;
+        });
+        
+        console.log(`Loading assignments for ${currentSemesterCourses.length} courses in current semester: ${currentSemester.name}`);
+
+        // Seed from persistent cache to update calendar/stats quickly
+        try {
+            const courseIds = currentSemesterCourses.map(c => Number(c.id));
+            const cachedResp = await window.electronAPI.getAssignmentsCache(appState.siteInfo?.userid, courseIds);
+            if (cachedResp && cachedResp.success) {
+                const now = Date.now();
+                const cachedAssignments = [];
+                Object.entries(cachedResp.data || {}).forEach(([cid, entry]) => {
+                    if (entry && Array.isArray(entry.data) && (now - entry.timestamp) < 24 * 60 * 60 * 1000) {
+                        cachedAssignments.push(...entry.data);
+                        // warm memory cache
+                        appState.assignmentsCache[String(cid)] = { data: entry.data, timestamp: entry.timestamp };
+                    }
+                });
+                if (cachedAssignments.length > 0) {
+                    appState.assignments = cachedAssignments;
+                    // Update just the calendar and dashboard while detailed list still shows loading
+                    updateSmartDashboard();
+                    updateMonthCalendar();
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to seed assignments from persistent cache:', e.message);
+        }
+        
+        // Show loading progress
+        elements.assignmentsList.innerHTML = `
+            <div class="loading-placeholder">
+                <i class="fas fa-spinner fa-spin"></i>
+                <p>Đang tải bài tập từ học kỳ hiện tại...</p>
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="assignment-progress-fill"></div>
+                    </div>
+                    <div class="progress-text" id="assignment-progress-text">0 / ${currentSemesterCourses.length} môn học</div>
+                </div>
+            </div>
+        `;
+        
+        let loadedCourses = 0;
+        
+        // Load assignments for current semester courses only
+        for (const course of currentSemesterCourses) {
+            try {
+                const assignments = await loadAssignmentsForCourse(course.id);
+                appState.assignments.push(...assignments);
+                
+                // Update progress
+                loadedCourses++;
+                const progressPercent = (loadedCourses / currentSemesterCourses.length) * 100;
+                const progressFill = document.getElementById('assignment-progress-fill');
+                const progressText = document.getElementById('assignment-progress-text');
+                
+                if (progressFill && progressText) {
+                    progressFill.style.width = `${progressPercent}%`;
+                    progressText.textContent = `${loadedCourses} / ${currentSemesterCourses.length} môn học - ${course.fullname}`;
+                }
+                
+            } catch (error) {
+                console.error(`Failed to load assignments for course ${course.id}:`, error);
+                loadedCourses++;
+            }
+        }
+        
+    console.log(`Loaded ${appState.assignments.length} assignments for current semester`);
+    console.log('Assignments loaded:', appState.assignments.map(a => ({ id: a.id, name: a.name, course: a.course })));
+    // Refresh UI after full load
+    updateSmartDashboard();
+    updateAssignmentsList();
+    updateMonthCalendar();
+        
+    } catch (error) {
+        console.error('Error loading assignments for current semester:', error);
+        elements.assignmentsList.innerHTML = `<p>Lỗi tải bài tập: ${error.message}</p>`;
+    }
+}
+
+// Load assignments for specific semester
+async function loadAssignmentsForSemester(semesterId) {
+    try {
+        appState.assignments = [];
+        
+        // Get courses for specified semester
+        const semesterCourses = appState.courses.filter(course => {
+            const courseSemId = appState.courseSemMap.get(course.id);
+            return courseSemId === semesterId;
+        });
+        
+        console.log(`Loading assignments for ${semesterCourses.length} courses in semester: ${getCategory(semesterId)?.name}`);
+
+        // Seed from persistent cache for this semester
+        try {
+            const courseIds = semesterCourses.map(c => Number(c.id));
+            const cachedResp = await window.electronAPI.getAssignmentsCache(appState.siteInfo?.userid, courseIds);
+            if (cachedResp && cachedResp.success) {
+                const now = Date.now();
+                const cachedAssignments = [];
+                Object.entries(cachedResp.data || {}).forEach(([cid, entry]) => {
+                    if (entry && Array.isArray(entry.data) && (now - entry.timestamp) < 24 * 60 * 60 * 1000) {
+                        cachedAssignments.push(...entry.data);
+                        appState.assignmentsCache[String(cid)] = { data: entry.data, timestamp: entry.timestamp };
+                    }
+                });
+                if (cachedAssignments.length > 0) {
+                    appState.assignments = cachedAssignments;
+                    updateSmartDashboard();
+                    updateMonthCalendar();
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to seed semester assignments from cache:', e.message);
+        }
+        
+        // Show loading progress
+        elements.assignmentsList.innerHTML = `
+            <div class="loading-placeholder">
+                <i class="fas fa-spinner fa-spin"></i>
+                <p>Đang tải bài tập từ học kỳ ${getCategory(semesterId)?.name}...</p>
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="assignment-progress-fill"></div>
+                    </div>
+                    <div class="progress-text" id="assignment-progress-text">0 / ${semesterCourses.length} môn học</div>
+                </div>
+            </div>
+        `;
+        
+        let loadedCourses = 0;
+        
+        // Load assignments for semester courses
+        for (const course of semesterCourses) {
+            try {
+                const assignments = await loadAssignmentsForCourse(course.id);
+                appState.assignments.push(...assignments);
+                
+                // Update progress
+                loadedCourses++;
+                const progressPercent = (loadedCourses / semesterCourses.length) * 100;
+                const progressFill = document.getElementById('assignment-progress-fill');
+                const progressText = document.getElementById('assignment-progress-text');
+                
+                if (progressFill && progressText) {
+                    progressFill.style.width = `${progressPercent}%`;
+                    progressText.textContent = `${loadedCourses} / ${semesterCourses.length} môn học - ${course.fullname}`;
+                }
+                
+            } catch (error) {
+                console.error(`Failed to load assignments for course ${course.id}:`, error);
+                loadedCourses++;
+            }
+        }
+        
+    console.log(`Loaded ${appState.assignments.length} assignments for semester`);
+    console.log('Assignments loaded:', appState.assignments.map(a => ({ id: a.id, name: a.name, course: a.course })));
+    // Refresh UI after full load
+    updateSmartDashboard();
+    updateAssignmentsList();
+    updateMonthCalendar();
+        
+    } catch (error) {
+        console.error('Error loading assignments for semester:', error);
+        elements.assignmentsList.innerHTML = `<p>Lỗi tải bài tập: ${error.message}</p>`;
+    }
+}
+
+// Main initialization
+async function initializeApp() {
+    let loadingNotifId;
+    try {
+        loadingNotifId = showNotification('Đang tải dữ liệu...', 'info', 15000);
+        
+        // Load settings including baseUrl
+        const settings = await window.electronAPI.getSettings();
+        if (settings?.baseUrl) {
+            appState.baseUrl = settings.baseUrl;
+        }
+        // Load urgent days threshold from settings if available
+        if (typeof settings?.urgentDaysThreshold === 'number') {
+            appState.urgentDays = settings.urgentDaysThreshold;
+        } else {
+            // also read from localStorage fallback
+            const ud = Number(localStorage.getItem('urgentDaysThreshold'));
+            if (!isNaN(ud) && ud > 0) appState.urgentDays = ud;
+        }
+        // Load pinned assignments
+        try {
+            const savedPins = JSON.parse(localStorage.getItem('pinnedAssignments') || '[]');
+            if (Array.isArray(savedPins)) {
+                appState.pinnedAssignments = new Set(savedPins.map(String));
+            }
+        } catch {}
+        // Load sort order
+        const savedSort = localStorage.getItem('sortOrder');
+        if (savedSort === 'closest' || savedSort === 'farthest' || savedSort === 'newest' || savedSort === 'oldest') {
+            appState.sortOrder = savedSort;
+        }
+        
+        // Load basic data
+        await loadSiteInfo();
+        await loadUserCourses();
+        await loadCategoriesForCourses();
+        try {
+            hydrateStcDerivedData();
+            renderScheduleUpdates();
+        } catch {}
+        
+        // Update UI
+        elements.userName.textContent = appState.currentUser.fullname;
+        updateDashboard();
+        updateSemesterFilter();
+        updateCourseFilter();
+        updateCoursesList();
+        updateSettings();
+
+        // Reflect settings into controls
+        if (elements.sortOrder) {
+            elements.sortOrder.value = appState.sortOrder;
+        }
+        if (elements.urgentDaysThreshold) {
+            elements.urgentDaysThreshold.value = String(appState.urgentDays);
+        }
+        if (elements.toggleGeneralCourses) {
+            const savedGC = localStorage.getItem('showGeneralCourses');
+            if (savedGC !== null) {
+                elements.toggleGeneralCourses.checked = savedGC === 'true';
+            }
+        }
+        
+        // Switch to main app view
+        if (elements.loginScreen && elements.mainApp) {
+            elements.loginScreen.classList.add('hidden');
+            elements.mainApp.classList.remove('hidden');
+            showSection('dashboard');
+        }
+
+        // Load assignments for current semester only (for better performance)
+        await loadAssignmentsForCurrentSemester();
+        updateDashboard();
+
+        // Initialize Timetable UI (bind buttons and load saved ICS)
+        await initTimetableUI();
+        
+        // Initialize Exam Schedule UI
+        await initExamScheduleUI();
+
+    // Populate instructor names asynchronously for visible courses
+    populateCourseInstructors().catch(e => console.warn('Populate instructors failed:', e.message));
+        
+    // Dismiss the loading toast if it's still visible
+    if (loadingNotifId) dismissNotification(loadingNotifId);
+    showNotification('Tải dữ liệu thành công!', 'success');
+        
+        // Start polling for new content
+        startPolling();
+
+        // Start realtime clock
+        startRealtimeClock();
+        
+        // Hide loading screen after everything is loaded (if still visible)
+        if (elements.loadingScreen && !elements.loadingScreen.classList.contains('hidden')) {
+            elements.loadingScreen.classList.add('hidden');
+        }
+
+    // Scroll-to-top button
+    (function initScrollTop(){
+        const btn = document.getElementById('scroll-top-btn');
+        if (!btn) return;
+        btn.addEventListener('click', () => window.scrollTo({ top:0, behavior:'smooth' }));
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 400) btn.style.display = 'inline-flex';
+            else btn.style.display = 'none';
+        }, { passive:true });
+    })();
+
+        // Wire auto-start checkbox
+        if (elements.autoStartWindows) {
+            elements.autoStartWindows.addEventListener('change', async (e) => {
+                try {
+                    const res = await window.electronAPI.setAutoStart(e.target.checked);
+                    if (res?.success) {
+                        showNotification('Đã cập nhật khởi động cùng Windows', 'success');
+                    } else {
+                        showNotification('Không thể lưu cài đặt khởi động', 'error');
+                    }
+                } catch (err) {
+                    showNotification('Lỗi lưu cài đặt khởi động', 'error');
+                }
+            });
+        }
+
+        // Wire minimize-to-tray checkbox
+        if (elements.minimizeToTray) {
+            elements.minimizeToTray.addEventListener('change', async (e) => {
+                try {
+                    await window.electronAPI.setMinimizeToTray(e.target.checked);
+                    showNotification('Đã cập nhật cài đặt thu nhỏ xuống khay', 'success');
+                } catch {
+                    showNotification('Không thể lưu cài đặt khay hệ thống', 'error');
+                }
+            });
+        }
+        
+    } catch (error) {
+        // Ensure loading toast is dismissed on error as well
+        try { if (loadingNotifId) dismissNotification(loadingNotifId); } catch {}
+        showNotification(`Lỗi khởi tạo ứng dụng: ${error.message}`, 'error');
+        console.error('Initialization error:', error);
+    }
+}
+
+// Fetch and fill instructor names for courses, updating UI as we go
+async function populateCourseInstructors() {
+    if (!appState.currentToken || !appState.courses.length) return;
+    // Limit concurrency to avoid hammering the API
+    const courses = [...appState.courses];
+    const limit = 4;
+    let index = 0;
+    const worker = async () => {
+        while (index < courses.length) {
+            const i = index++;
+            const course = courses[i];
+            try {
+                const teachers = await callAPI('getCourseTeachers', appState.currentToken, course.id);
+                if (Array.isArray(teachers) && teachers.length > 0) {
+                    const names = teachers.map(t => t.fullname).join(', ');
+                    course.instructor = names;
+                    // Update the course cards UI for this item if currently rendered
+                    updateCoursesList();
+                }
+            } catch (e) {
+                // Ignore errors; keep UI responsive
+            }
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(limit, courses.length) }, () => worker()));
+}
+
+// UNIFIED FEED FUNCTIONS
+async function loadUnifiedFeed() {
+    try {
+        // Load content from current semester courses only (for better performance)
+        const currentSemester = appState.semesters.length > 0 ? appState.semesters[0] : null;
+        const coursesToLoad = currentSemester ? 
+            appState.courses.filter(course => appState.courseSemMap.get(course.id) === currentSemester.id) :
+            appState.courses;
+        
+        const totalCourses = coursesToLoad.length;
+        let loadedCourses = 0;
+        
+        elements.feedContent.innerHTML = `
+            <div class="loading-placeholder">
+                <i class="fas fa-spinner fa-spin"></i>
+                <p>Đang tải nội dung từ môn học hiện tại...</p>
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="feed-progress-fill"></div>
+                    </div>
+                    <div class="progress-text" id="feed-progress-text">0 / ${totalCourses} môn học</div>
+                </div>
+            </div>
+        `;
+        
+        const allContent = [];
+        
+        console.log(`Loading unified feed content for ${coursesToLoad.length} courses in current semester`);
+        console.log('Courses to load:', coursesToLoad.map(c => ({ id: c.id, name: c.fullname })));
+        
+        for (const course of coursesToLoad) {
+            try {
+                console.log(`Loading content for course ${course.id} (${course.fullname})`);
+                const contents = await window.electronAPI.getCourseContents(appState.currentToken, course.id);
+                const sections = Array.isArray(contents) ? contents : [];
+                console.log(`Found ${sections.length} sections for course ${course.id}`);
+                
+                sections.forEach(section => {
+                    (section.modules || []).forEach(module => {
+                        if (['forum', 'resource', 'url', 'page'].includes(module.modname)) {
+                            const contentItem = {
+                                id: `${course.id}-${module.id}`,
+                                type: module.modname,
+                                title: module.name || 'Untitled',
+                                description: module.description || '',
+                                url: module.url || '#',
+                                courseId: course.id,
+                                courseName: course.fullname,
+                                sectionName: section.name || 'General',
+                                added: module.added || Date.now() / 1000,
+                                modified: module.modified || Date.now() / 1000,
+                                visible: module.visible !== 0,
+                                searchableText: `${module.name} ${module.description} ${course.fullname}`.toLowerCase()
+                            };
+                            
+                            if (contentItem.visible) {
+                                allContent.push(contentItem);
+                            }
+                        }
+                    });
+                });
+                
+                // Update progress
+                loadedCourses++;
+                const progressPercent = (loadedCourses / totalCourses) * 100;
+                const progressFill = document.getElementById('feed-progress-fill');
+                const progressText = document.getElementById('feed-progress-text');
+                
+                if (progressFill && progressText) {
+                    progressFill.style.width = `${progressPercent}%`;
+                    progressText.textContent = `${loadedCourses} / ${totalCourses} môn học - ${course.fullname}`;
+                }
+                
+            } catch (error) {
+                console.error(`Failed to load content for course ${course.id}:`, error);
+                loadedCourses++;
+            }
+        }
+        
+        // Sort by modification date (newest first)
+        allContent.sort((a, b) => b.modified - a.modified);
+        
+        console.log(`Total content items loaded: ${allContent.length}`);
+        console.log('Content items:', allContent.map(item => ({ id: item.id, title: item.title, type: item.type, course: item.courseName })));
+        
+        // Update feed data
+        appState.feedData.allContent = allContent;
+        appState.feedData.lastUpdated = new Date();
+        
+        // Build search index
+        buildSearchIndex();
+        
+        // Apply current filters
+        applyFeedFilters();
+        
+        // Update UI
+        updateFeedUI();
+        updateFeedStats();
+        updateRecentContent();
+        
+        showNotification(`Đã tải ${allContent.length} nội dung từ ${coursesToLoad.length} môn học (học kỳ hiện tại)`, 'success');
+        
+    } catch (error) {
+        elements.feedContent.innerHTML = `<p>Lỗi tải nội dung: ${error.message}</p>`;
+        showNotification(`Lỗi tải nội dung: ${error.message}`, 'error');
+    }
+}
+
+function buildSearchIndex() {
+    appState.feedData.searchIndex.clear();
+    
+    appState.feedData.allContent.forEach((item, index) => {
+        // Index by words in searchable text
+        const words = item.searchableText.split(/\s+/);
+        words.forEach(word => {
+            if (word.length > 2) { // Only index words longer than 2 characters
+                if (!appState.feedData.searchIndex.has(word)) {
+                    appState.feedData.searchIndex.set(word, []);
+                }
+                appState.feedData.searchIndex.get(word).push(index);
+            }
+        });
+    });
+}
+
+function applyFeedFilters() {
+    let filtered = [...appState.feedData.allContent];
+    
+    // Apply type filter
+    if (appState.feedData.currentFilters.type !== 'all') {
+        filtered = filtered.filter(item => item.type === appState.feedData.currentFilters.type);
+    }
+    
+    // Apply course filter
+    if (appState.feedData.currentFilters.course) {
+        const courseId = parseInt(appState.feedData.currentFilters.course);
+        filtered = filtered.filter(item => item.courseId === courseId);
+    }
+    
+    // Apply search filter
+    if (appState.feedData.currentFilters.search) {
+        const searchTerm = appState.feedData.currentFilters.search.toLowerCase();
+        filtered = filtered.filter(item => 
+            item.searchableText.includes(searchTerm)
+        );
+    }
+    
+    // Apply sorting
+    switch (appState.feedData.currentFilters.sort) {
+        case 'newest':
+            filtered.sort((a, b) => b.modified - a.modified);
+            break;
+        case 'oldest':
+            filtered.sort((a, b) => a.modified - b.modified);
+            break;
+        case 'course':
+            filtered.sort((a, b) => a.courseName.localeCompare(b.courseName));
+            break;
+        case 'type':
+            filtered.sort((a, b) => a.type.localeCompare(b.type));
+            break;
+    }
+    
+    appState.feedData.filteredContent = filtered;
+}
+
+function updateFeedUI() {
+    const content = appState.feedData.filteredContent;
+    
+    console.log('Feed UI Update:', {
+        allContent: appState.feedData.allContent.length,
+        filteredContent: content.length,
+        filters: appState.feedData.currentFilters
+    });
+    
+    if (content.length === 0) {
+        if (appState.feedData.allContent.length === 0) {
+            elements.feedContent.innerHTML = `
+                <div class="loading-placeholder">
+                    <i class="fas fa-info-circle"></i>
+                    <p>Chưa có nội dung nào được tải. Vui lòng làm mới để tải nội dung.</p>
+                </div>
+            `;
+        } else {
+            elements.feedContent.innerHTML = `
+                <div class="loading-placeholder">
+                    <i class="fas fa-search"></i>
+                    <p>Không tìm thấy nội dung nào phù hợp với bộ lọc hiện tại.</p>
+                </div>
+            `;
+        }
+        return;
+    }
+    
+    elements.feedContent.innerHTML = content.map(item => {
+        const typeIcon = {
+            'forum': 'fas fa-bullhorn',
+            'resource': 'fas fa-file-alt',
+            'url': 'fas fa-link',
+            'page': 'fas fa-file-text'
+        }[item.type] || 'fas fa-file';
+        
+        const typeLabel = {
+            'forum': 'Thông báo',
+            'resource': 'Tài liệu',
+            'url': 'Liên kết',
+            'page': 'Trang'
+        }[item.type] || item.type;
+        
+        return `
+            <div class="feed-item" data-id="${item.id}">
+                <div class="feed-item-header">
+                    <div class="feed-item-type ${item.type}">
+                        <i class="${typeIcon}"></i>
+                        <span>${typeLabel}</span>
+                    </div>
+                    <div class="feed-item-actions">
+                        <button class="btn btn-outline btn-small" onclick="openContent('${item.url}')">
+                            <i class="fas fa-external-link-alt"></i>
+                            Mở
+                        </button>
+                        <button class="btn btn-outline btn-small" onclick="saveContent('${item.id}')">
+                            <i class="fas fa-bookmark"></i>
+                            Lưu
+                        </button>
+                    </div>
+                </div>
+                <div class="feed-item-title">${item.title}</div>
+                <div class="feed-item-course">
+                    <i class="fas fa-graduation-cap"></i>
+                    ${item.courseName}
+                </div>
+                ${item.description ? `<div class="feed-item-description">${item.description}</div>` : ''}
+                <div class="feed-item-meta">
+                    <span><i class="fas fa-calendar"></i> ${formatDate(item.modified)}</span>
+                    <span><i class="fas fa-folder"></i> ${item.sectionName}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function updateFeedStats() {
+    const allContent = appState.feedData.allContent;
+    const filteredContent = appState.feedData.filteredContent;
+    
+    // Update counts
+    elements.totalContent.textContent = allContent.length;
+    elements.totalAnnouncements.textContent = allContent.filter(item => item.type === 'forum').length;
+    elements.totalResources.textContent = allContent.filter(item => item.type === 'resource').length;
+    elements.totalLinks.textContent = allContent.filter(item => item.type === 'url').length;
+    
+    // Update results count
+    elements.feedResultsCount.textContent = `${filteredContent.length} kết quả`;
+    
+    // Update last updated time
+    if (appState.feedData.lastUpdated) {
+        elements.feedLastUpdated.textContent = `Cập nhật lần cuối: ${appState.feedData.lastUpdated.toLocaleTimeString('vi-VN')}`;
+    }
+}
+
+function updateRecentContent() {
+    const recent = appState.feedData.allContent.slice(0, 5);
+    
+    if (recent.length === 0) {
+        elements.recentContent.innerHTML = '<p class="text-muted">Chưa có dữ liệu</p>';
+        return;
+    }
+    
+    elements.recentContent.innerHTML = recent.map(item => `
+        <div class="recent-item" onclick="scrollToContent('${item.id}')">
+            <div class="recent-item-title">${item.title}</div>
+            <div class="recent-item-meta">${item.courseName} • ${formatDateShort(item.modified)}</div>
+        </div>
+    `).join('');
+}
+
+function updateSavedContent() {
+    const saved = JSON.parse(localStorage.getItem('savedContent') || '[]');
+    
+    if (saved.length === 0) {
+        elements.savedContent.innerHTML = '<p class="text-muted">Chưa có nội dung đã lưu</p>';
+        return;
+    }
+    
+    const savedItems = saved.map(id => 
+        appState.feedData.allContent.find(item => item.id === id)
+    ).filter(Boolean);
+    
+    elements.savedContent.innerHTML = savedItems.map(item => `
+        <div class="saved-item" onclick="scrollToContent('${item.id}')">
+            <div class="saved-item-title">${item.title}</div>
+            <div class="saved-item-meta">${item.courseName}</div>
+        </div>
+    `).join('');
+}
+
+// Feed interaction functions
+function openContent(url) {
+    if (url && url !== '#') {
+        window.open(url, '_blank');
+    }
+}
+
+function saveContent(contentId) {
+    const saved = JSON.parse(localStorage.getItem('savedContent') || '[]');
+    if (!saved.includes(contentId)) {
+        saved.push(contentId);
+        localStorage.setItem('savedContent', JSON.stringify(saved));
+        showNotification('Đã lưu nội dung!', 'success');
+        updateSavedContent();
+    } else {
+        showNotification('Nội dung đã được lưu trước đó', 'info');
+    }
+}
+
+function scrollToContent(contentId) {
+    const element = document.querySelector(`[data-id="${contentId}"]`);
+    if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element.style.animation = 'pulse 0.5s ease-in-out';
+        setTimeout(() => {
+            element.style.animation = '';
+        }, 500);
+    }
+}
+
+function exportFeedData() {
+    try {
+        const data = {
+            exportDate: new Date().toISOString(),
+            totalContent: appState.feedData.allContent.length,
+            content: appState.feedData.allContent.map(item => ({
+                title: item.title,
+                type: item.type,
+                course: item.courseName,
+                description: item.description,
+                url: item.url,
+                modified: new Date(item.modified * 1000).toISOString()
+            }))
+        };
+        
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `UIT-Feed-Export-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showNotification('Đã xuất dữ liệu feed thành công!', 'success');
+    } catch (error) {
+        showNotification(`Lỗi xuất dữ liệu: ${error.message}`, 'error');
+    }
+}
+
+// Legacy functions for backward compatibility
+function populateInfoCourseSelect() {
+    // This is now handled by the unified feed
+    if (elements.feedCourseFilter) {
+
+// Calendar day picker modal
+function openCalendarDayPicker(isoDate, items) {
+    const modal = document.getElementById('calendar-day-modal');
+    const body = document.getElementById('calendar-day-body');
+    if (!modal || !body) return;
+    const d = new Date(isoDate + 'T00:00:00');
+    const title = modal.querySelector('.modal-header h3');
+    if (title) title.textContent = `Bài tập ngày ${d.toLocaleDateString('vi-VN')}`;
+    body.innerHTML = items.map(a => `
+        <div class="content-item">
+            <div class="content-item-header">
+                <span class="content-type-badge assignment">Bài tập</span>
+                <span class="content-date">${new Date(a.duedate*1000).toLocaleTimeString('vi-VN')}</span>
+            </div>
+            <h5 class="content-title">${a.name}</h5>
+            <div class="content-meta">
+                <span class="status-badge ${a.status}">${a.status === 'submitted' ? 'Đã nộp' : 'Chưa nộp'}</span>
+            </div>
+        </div>
+    `).join('');
+    modal.classList.remove('hidden');
+}
+
+function closeCalendarDayPicker() {
+    const modal = document.getElementById('calendar-day-modal');
+    if (modal) modal.classList.add('hidden');
+}
+        elements.feedCourseFilter.innerHTML = '<option value="">Tất cả môn học</option>';
+        appState.courses.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.id;
+            opt.textContent = c.fullname;
+            elements.feedCourseFilter.appendChild(opt);
+        });
+    }
+}
+
+async function loadCourseNotices(courseId) {
+    // This is now handled by the unified feed
+    if (courseId) {
+        appState.feedData.currentFilters.course = courseId;
+        applyFeedFilters();
+        updateFeedUI();
+    }
+}
+
+async function refreshData() {
+    try {
+        elements.refreshDataBtn.disabled = true;
+        elements.refreshDataBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang làm mới...';
+        
+        // Reload all data
+        await loadSiteInfo();
+        await loadUserCourses();
+        await loadCategoriesForCourses();
+        
+        // Reload assignments
+        appState.assignments = [];
+        for (const course of appState.courses) {
+            const assignments = await loadAssignmentsForCourse(course.id);
+            appState.assignments.push(...assignments);
+        }
+        
+        // Clear and reload unified feed
+        appState.feedData.allContent = [];
+        appState.feedData.filteredContent = [];
+        appState.feedData.searchIndex.clear();
+        
+        // Update UI
+        updateDashboard();
+        updateSemesterFilter();
+        updateCourseFilter();
+        updateCoursesList();
+        updateSettings();
+        
+        // Reload unified feed if on info tab
+        const currentSection = document.querySelector('.content-section:not(.hidden)');
+        if (currentSection && currentSection.id === 'info-section') {
+            await loadUnifiedFeed();
+        }
+        
+        showNotification('Làm mới dữ liệu thành công!', 'success');
+        
+    } catch (error) {
+        showNotification(`Lỗi làm mới dữ liệu: ${error.message}`, 'error');
+    } finally {
+        elements.refreshDataBtn.disabled = false;
+        elements.refreshDataBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Làm mới dữ liệu';
+    }
+}
+
+// SMART NOTIFICATIONS SYSTEM
+class SmartNotificationSystem {
+    constructor() {
+        this.settings = {
+            enabled: true,
+            showToasts: true,
+            showInApp: true,
+            soundEnabled: true,
+            checkInterval: 5 * 60 * 1000,
+            notifyNewAssignments: true,
+            notifyNewContent: true,
+            notifyUpcomingDeadlines: true
+        };
+        this.lastCheckData = {
+            assignments: new Map(),
+            content: new Map(),
+            lastCheckTime: null
+        };
+    }
+
+    async init() {
+        try {
+            // Load notification settings
+            this.settings = await window.electronAPI.getNotificationSettings();
+            this.updateUI();
+        } catch (error) {
+            console.error('Failed to load notification settings:', error);
+        }
+    }
+
+    updateUI() {
+        if (elements.enableToastNotifications) {
+            elements.enableToastNotifications.checked = this.settings.showToasts;
+        }
+        if (elements.enableInAppNotifications) {
+            elements.enableInAppNotifications.checked = this.settings.showInApp;
+        }
+        if (elements.enableNotificationSound) {
+            elements.enableNotificationSound.checked = this.settings.soundEnabled;
+        }
+        if (elements.notificationCheckInterval) {
+            elements.notificationCheckInterval.value = this.settings.checkInterval / (60 * 1000);
+        }
+        if (elements.ignoreOldDays) {
+            elements.ignoreOldDays.value = this.settings.ignoreOldDays || 7;
+        }
+        if (elements.notifyNewAssignments) {
+            elements.notifyNewAssignments.checked = this.settings.notifyNewAssignments;
+        }
+        if (elements.notifyNewContent) {
+            elements.notifyNewContent.checked = this.settings.notifyNewContent;
+        }
+        if (elements.notifyUpcomingDeadlines) {
+            elements.notifyUpcomingDeadlines.checked = this.settings.notifyUpcomingDeadlines;
+        }
+    }
+
+    async saveSettings() {
+        try {
+            await window.electronAPI.updateNotificationSettings(this.settings);
+            showNotification('Đã lưu cài đặt thông báo', 'success');
+        } catch (error) {
+            showNotification(`Lỗi lưu cài đặt: ${error.message}`, 'error');
+        }
+    }
+
+    async testNotification() {
+        try {
+            await window.electronAPI.testNotification(
+                'Test thông báo',
+                'Đây là thông báo test từ UIT Assignment Manager',
+                'info'
+            );
+        } catch (error) {
+            showNotification(`Lỗi test thông báo: ${error.message}`, 'error');
+        }
+    }
+
+    async checkForChanges() {
+        if (!appState.currentToken || !appState.siteInfo?.userid) return;
+        
+        try {
+            // Filter assignments to only include current/recent ones (last 3 months)
+            const threeMonthsAgo = Date.now() - (3 * 30 * 24 * 60 * 60 * 1000);
+            const recentAssignments = appState.assignments.filter(assignment => {
+                const dueDate = assignment.duedate * 1000;
+                const createdDate = assignment.timecreated * 1000;
+                return dueDate > threeMonthsAgo || createdDate > threeMonthsAgo;
+            });
+            
+            // Check assignment changes (only recent assignments)
+            if (this.settings.notifyNewAssignments && recentAssignments.length > 0) {
+                await window.electronAPI.checkAssignmentChanges(recentAssignments);
+            }
+
+            // Filter content to only include recent ones (last 2 months)
+            const twoMonthsAgo = Date.now() - (2 * 30 * 24 * 60 * 60 * 1000);
+            const allContent = Array.isArray(appState.feedData?.allContent) ? appState.feedData.allContent : [];
+            if (allContent.length === 0) return;
+            const recentContent = allContent.filter(content => {
+                const modifiedDate = content.modified * 1000;
+                return modifiedDate > twoMonthsAgo;
+            });
+            
+            // Check content changes (only recent content)
+            if (this.settings.notifyNewContent && recentContent.length > 0) {
+                await window.electronAPI.checkContentChanges(recentContent);
+            }
+
+            // Check upcoming deadlines (only recent assignments)
+            if (this.settings.notifyUpcomingDeadlines) {
+                this.checkUpcomingDeadlines(recentAssignments);
+            }
+
+        } catch (error) {
+            console.error('Error checking for changes:', error);
+        }
+    }
+
+    checkUpcomingDeadlines(assignments = appState.assignments) {
+        const now = Math.floor(Date.now() / 1000);
+        const tomorrow = now + (24 * 60 * 60);
+        
+        const upcomingDeadlines = assignments.filter(assignment => {
+            if (!assignment.duedate || assignment.status === 'submitted' || assignment.isGroup) {
+                return false;
+            }
+            return assignment.duedate > now && assignment.duedate <= tomorrow;
+        });
+
+        if (upcomingDeadlines.length > 0) {
+            upcomingDeadlines.forEach(assignment => {
+                const course = appState.courses.find(c => c.id === assignment.course);
+                const courseName = course ? course.fullname : 'Unknown Course';
+                const hoursLeft = Math.ceil((assignment.duedate - now) / 3600);
+                
+                showNotification(
+                    `⏰ Deadline sắp tới: ${assignment.name} (${courseName}) - Còn ${hoursLeft} giờ`,
+                    'warning',
+                    10000
+                );
+            });
+        }
+    }
+}
+
+// Initialize smart notification system
+const smartNotifications = new SmartNotificationSystem();
+
+// Assignment Enhancements System
+class AssignmentEnhancements {
+    constructor() {
+        this.currentAssignmentId = null;
+        this.currentEnhancements = {};
+    }
+
+    async openAssignmentDetails(assignmentId) {
+        this.currentAssignmentId = assignmentId;
+        
+        try {
+            // Convert string ID to number for comparison
+            const numericId = Number(assignmentId);
+            
+            console.log('Opening assignment details:', {
+                assignmentId,
+                numericId,
+                assignmentsCount: appState.assignments.length,
+                availableIds: appState.assignments.map(a => ({ id: a.id, name: a.name }))
+            });
+            
+            // Get assignment data
+            let assignment = appState.assignments.find(a => a.id === numericId);
+            
+            // If not found in current assignments, try to load it
+            if (!assignment) {
+                console.log('Assignment not found in current list, trying to load...');
+                // Find the course that contains this assignment
+                // We need to search through all courses to find which one has this assignment
+                for (const course of appState.courses) {
+                    try {
+                        const assignments = await loadAssignmentsForCourse(course.id);
+                        const foundAssignment = assignments.find(a => a.id === numericId);
+                        if (foundAssignment) {
+                            assignment = foundAssignment;
+                            // Add to current assignments if not already there
+                            if (!appState.assignments.find(a => a.id === numericId)) {
+                                appState.assignments.push(assignment);
+                            }
+                            break;
+                        }
+                    } catch (error) {
+                        console.error('Error loading assignment for course:', error);
+                    }
+                }
+            }
+            
+            if (!assignment) {
+                console.error('Assignment not found:', {
+                    assignmentId,
+                    numericId,
+                    availableIds: appState.assignments.map(a => a.id),
+                    assignmentsCount: appState.assignments.length
+                });
+                showNotification('Không tìm thấy bài tập', 'error');
+                return;
+            }
+
+            // Get course name
+            const course = appState.courses.find(c => c.id === assignment.course);
+            const courseName = course ? course.fullname : 'Unknown Course';
+
+            // Load enhancements
+            const result = await window.electronAPI.getAssignmentEnhancements(assignmentId);
+            this.currentEnhancements = result.success ? result.data : {};
+
+            // Populate modal
+            this.populateAssignmentDetails(assignment, courseName);
+            this.populateEnhancements();
+
+            // Show modal
+            document.getElementById('assignment-details-modal').classList.remove('hidden');
+        } catch (error) {
+            showNotification(`Lỗi mở chi tiết bài tập: ${error.message}`, 'error');
+        }
+    }
+
+    populateAssignmentDetails(assignment, courseName) {
+        document.getElementById('details-assignment-name').textContent = assignment.name;
+        document.getElementById('details-course-name').textContent = courseName;
+        document.getElementById('details-deadline').textContent = assignment.duedate 
+            ? new Date(assignment.duedate * 1000).toLocaleString('vi-VN')
+            : 'Không có deadline';
+        
+        const statusElement = document.getElementById('details-status');
+        statusElement.textContent = assignment.status === 'submitted' ? 'Đã nộp' : 'Chưa nộp';
+        statusElement.className = `assignment-status ${assignment.status}`;
+    }
+
+    populateEnhancements() {
+        // Priority
+        const priority = this.currentEnhancements.priority || 'medium';
+        document.querySelector(`input[name="priority"][value="${priority}"]`).checked = true;
+
+        // Notes
+        document.getElementById('assignment-notes').value = this.currentEnhancements.notes || '';
+
+        // Subtasks
+        this.renderSubtasks();
+
+        // Reminder
+        const reminder = this.currentEnhancements.reminder;
+        document.getElementById('enable-reminder').checked = !!reminder;
+        if (reminder) {
+            document.getElementById('reminder-options').classList.remove('hidden');
+            document.getElementById('reminder-time').value = reminder.hoursBefore || 24;
+        } else {
+            document.getElementById('reminder-options').classList.add('hidden');
+        }
+    }
+
+    renderSubtasks() {
+        const subtasksList = document.getElementById('subtasks-list');
+        const subtasks = this.currentEnhancements.subtasks || [];
+
+        if (subtasks.length === 0) {
+            subtasksList.innerHTML = '<p class="text-muted">Chưa có công việc nào</p>';
+            return;
+        }
+
+        subtasksList.innerHTML = subtasks.map(subtask => `
+            <div class="subtask-item ${subtask.completed ? 'completed' : ''}">
+                <input type="checkbox" class="subtask-checkbox" ${subtask.completed ? 'checked' : ''}
+                       onchange="toggleSubtask('${subtask.id}', this.checked)">
+                <span class="subtask-text">${subtask.text}</span>
+                <div class="subtask-actions">
+                    <button class="subtask-btn" onclick="editSubtask('${subtask.id}')" title="Sửa">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="subtask-btn" onclick="deleteSubtask('${subtask.id}')" title="Xóa">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async setPriority(priority) {
+        if (!this.currentAssignmentId) return;
+
+        try {
+            await window.electronAPI.setAssignmentPriority(this.currentAssignmentId, priority);
+            this.currentEnhancements.priority = priority;
+            showNotification('Đã cập nhật mức độ ưu tiên', 'success');
+        } catch (error) {
+            showNotification(`Lỗi cập nhật ưu tiên: ${error.message}`, 'error');
+        }
+    }
+
+    async saveNotes(notes) {
+        if (!this.currentAssignmentId) return;
+
+        try {
+            await window.electronAPI.setAssignmentNotes(this.currentAssignmentId, notes);
+            this.currentEnhancements.notes = notes;
+        } catch (error) {
+            showNotification(`Lỗi lưu ghi chú: ${error.message}`, 'error');
+        }
+    }
+
+    async addSubtask(text) {
+        if (!this.currentAssignmentId || !text.trim()) return;
+
+        try {
+            const result = await window.electronAPI.addAssignmentSubtask(this.currentAssignmentId, { text: text.trim() });
+            if (result.success) {
+                if (!this.currentEnhancements.subtasks) {
+                    this.currentEnhancements.subtasks = [];
+                }
+                this.currentEnhancements.subtasks.push(result.data);
+                this.renderSubtasks();
+                document.getElementById('new-subtask-input').value = '';
+                showNotification('Đã thêm công việc mới', 'success');
+            }
+        } catch (error) {
+            showNotification(`Lỗi thêm công việc: ${error.message}`, 'error');
+        }
+    }
+
+    async toggleSubtask(subtaskId, completed) {
+        if (!this.currentAssignmentId) return;
+
+        try {
+            await window.electronAPI.updateAssignmentSubtask(this.currentAssignmentId, subtaskId, { completed });
+            const subtask = this.currentEnhancements.subtasks.find(st => st.id === subtaskId);
+            if (subtask) {
+                subtask.completed = completed;
+                this.renderSubtasks();
+            }
+        } catch (error) {
+            showNotification(`Lỗi cập nhật công việc: ${error.message}`, 'error');
+        }
+    }
+
+    async deleteSubtask(subtaskId) {
+        if (!this.currentAssignmentId) return;
+
+        try {
+            await window.electronAPI.deleteAssignmentSubtask(this.currentAssignmentId, subtaskId);
+            this.currentEnhancements.subtasks = this.currentEnhancements.subtasks.filter(st => st.id !== subtaskId);
+            this.renderSubtasks();
+            showNotification('Đã xóa công việc', 'success');
+        } catch (error) {
+            showNotification(`Lỗi xóa công việc: ${error.message}`, 'error');
+        }
+    }
+
+    async setReminder(enabled, hoursBefore = 24) {
+        if (!this.currentAssignmentId) return;
+
+        try {
+            const reminder = enabled ? { hoursBefore, enabled: true } : null;
+            await window.electronAPI.setAssignmentReminder(this.currentAssignmentId, reminder);
+            this.currentEnhancements.reminder = reminder;
+        } catch (error) {
+            showNotification(`Lỗi cập nhật nhắc nhở: ${error.message}`, 'error');
+        }
+    }
+
+    close() {
+        document.getElementById('assignment-details-modal').classList.add('hidden');
+        this.currentAssignmentId = null;
+        this.currentEnhancements = {};
+    }
+}
+
+// Initialize assignment enhancements
+const assignmentEnhancements = new AssignmentEnhancements();
+
+// Global functions for assignment enhancements
+let currentAssignmentId = null;
+
+async function openAssignment(assignmentId) {
+    try {
+        const numericId = Number(assignmentId);
+        let assignment = appState.assignments.find(a => a.id === numericId);
+        
+        // If not found in current assignments, try to load it
+        if (!assignment) {
+            console.log('Assignment not found in current list, trying to load...');
+            // Find the course that contains this assignment
+            for (const course of appState.courses) {
+                try {
+                    const assignments = await loadAssignmentsForCourse(course.id);
+                    const foundAssignment = assignments.find(a => a.id === numericId);
+                    if (foundAssignment) {
+                        assignment = foundAssignment;
+                        // Add to current assignments if not already there
+                        if (!appState.assignments.find(a => a.id === numericId)) {
+                            appState.assignments.push(assignment);
+                        }
+                        break;
+                    }
+                } catch (error) {
+                    console.error('Error loading assignment for course:', error);
+                }
+            }
+        }
+        
+        if (!assignment) {
+            showNotification('Không tìm thấy bài tập', 'error');
+            return;
+        }
+        
+        // Open assignment URL in external browser, build fallback from cmid if needed
+        let openUrl = assignment.url || null;
+        if (!openUrl && assignment.cmid) {
+            openUrl = `${appState.baseUrl}/mod/assign/view.php?id=${assignment.cmid}`;
+        }
+        if (!openUrl) {
+            // Try map cmid from course contents
+            try {
+                const contents = await callAPI('getCourseContents', appState.currentToken, assignment.course);
+                let cmid = null;
+                if (Array.isArray(contents)) {
+                    contents.forEach(section => {
+                        (section.modules || []).forEach(module => {
+                            if (module.modname === 'assign' && module.instance === assignment.id) {
+                                cmid = module.id;
+                                if (!assignment.cmid) assignment.cmid = cmid;
+                                if (!assignment.url && module.url) assignment.url = module.url;
+                            }
+                        });
+                    });
+                }
+                if (!openUrl && cmid) {
+                    openUrl = `${appState.baseUrl}/mod/assign/view.php?id=${cmid}`;
+                }
+            } catch (e) {
+                console.warn('Failed to map assignment cmid from contents:', e.message);
+            }
+        }
+        if (openUrl) {
+            window.electronAPI.openExternal(openUrl);
+        } else {
+            showNotification('Không có liên kết bài tập', 'warning');
+        }
+    } catch (error) {
+        console.error('Error opening assignment:', error);
+        showNotification('Lỗi mở bài tập', 'error');
+    }
+}
+
+async function openAssignmentDetails(assignmentId) {
+    try {
+        console.log('Opening assignment details for ID:', assignmentId);
+        currentAssignmentId = assignmentId;
+        const numericId = Number(assignmentId);
+        console.log('Numeric ID:', numericId);
+        console.log('Current assignments count:', appState.assignments.length);
+        console.log('Available assignment IDs:', appState.assignments.map(a => a.id));
+        
+        let assignment = appState.assignments.find(a => a.id === numericId);
+        console.log('Found assignment:', assignment ? assignment.name : 'Not found');
+        
+        // If not found in current assignments, try to load it
+        if (!assignment) {
+            console.log('Assignment not found in current list, trying to load...');
+            console.log('Available courses:', appState.courses.map(c => ({ id: c.id, name: c.fullname })));
+            
+            // Find the course that contains this assignment
+            for (const course of appState.courses) {
+                try {
+                    console.log(`Checking course ${course.id}: ${course.fullname}`);
+                    const assignments = await loadAssignmentsForCourse(course.id);
+                    console.log(`Found ${assignments.length} assignments in course ${course.id}`);
+                    
+                    const foundAssignment = assignments.find(a => a.id === numericId);
+                    if (foundAssignment) {
+                        console.log('Found assignment in course:', course.fullname, foundAssignment);
+                        assignment = foundAssignment;
+                        // Add to current assignments if not already there
+                        if (!appState.assignments.find(a => a.id === numericId)) {
+                            appState.assignments.push(assignment);
+                        }
+                        break;
+                    }
+                } catch (error) {
+                    console.error('Error loading assignment for course:', course.id, error);
+                }
+            }
+        }
+        
+        if (!assignment) {
+            console.error('Assignment not found after searching all courses');
+            showNotification('Không tìm thấy bài tập', 'error');
+            return;
+        }
+        
+        // Validate assignment data
+        if (!assignment.id || !assignment.name) {
+            console.error('Invalid assignment data:', assignment);
+            showNotification('Dữ liệu bài tập không hợp lệ', 'error');
+            return;
+        }
+        
+        console.log('Showing assignment details page for:', assignment.name);
+        // Show assignment details page
+        showAssignmentDetailsPage(assignment);
+        
+    } catch (error) {
+        console.error('Error opening assignment details:', error);
+        showNotification('Lỗi mở chi tiết bài tập', 'error');
+    }
+}
+
+async function showAssignmentDetailsPage(assignment) {
+    try {
+        console.log('showAssignmentDetailsPage called with:', assignment);
+        
+        // Validate assignment
+        if (!assignment || !assignment.id || !assignment.name) {
+            console.error('Invalid assignment passed to showAssignmentDetailsPage:', assignment);
+            showNotification('Dữ liệu bài tập không hợp lệ', 'error');
+            return;
+        }
+        
+        // Update title
+        if (elements.assignmentDetailsTitle) {
+            elements.assignmentDetailsTitle.textContent = assignment.name;
+        }
+        
+        // Update open assignment button
+        if (elements.openAssignmentBtn) {
+            elements.openAssignmentBtn.onclick = () => openAssignment(assignment.id);
+        }
+        
+        // Set current assignment ID for the button
+        currentAssignmentId = assignment.id;
+    
+        // Get course name
+        const course = appState.courses.find(c => c.id === assignment.course);
+        const courseName = course ? course.fullname : 'Unknown Course';
+        
+        console.log('Course found:', courseName);
+        
+        // Render assignment details with teacher description
+        if (elements.assignmentDetailsContent) {
+            elements.assignmentDetailsContent.innerHTML = `
+        <div class="assignment-details-card">
+            <div class="assignment-details-header">
+                <div class="header-content">
+                    <div class="header-left">
+                        <button class="btn-back" onclick="showSection('assignments')" title="Quay lại">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <h1 class="assignment-details-title">${assignment.name}</h1>
+                    </div>
+                    <div class="header-right">
+                        ${!assignment.isSubmitted ? `
+                        <div class="header-countdown" id="header-countdown-${assignment.id}">
+                            <div class="countdown-icon-small">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="countdown-text">
+                                <span class="countdown-days">--</span> ngày
+                                <span class="countdown-hours">--</span> giờ
+                                <span class="countdown-minutes">--</span> phút
+                            </div>
+                        </div>
+                        ` : ''}
+                        <button class="btn-header btn-primary" id="open-assignment-btn" onclick="openAssignment(${assignment.id})" title="Mở bài tập">
+                            <i class="fas fa-external-link-alt"></i>
+                        </button>
+                        <button class="btn-header btn-primary" onclick="openSubmission(${assignment.id})" title="Mở trang nộp bài">
+                            <i class="fas fa-upload"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="assignment-details-meta">
+                <!-- Priority Information (Highlighted) -->
+                <div class="meta-priority">
+                    <div class="assignment-meta-item priority-highlight">
+                        <span class="assignment-meta-label">Môn học</span>
+                        <span class="assignment-meta-value">${courseName}</span>
+                        <button class="btn btn-link" style="margin-left:8px" onclick="openCourseDetails(${assignment.course})" title="Mở chi tiết môn học">
+                            <i class="fas fa-graduation-cap"></i> Xem môn học
+                        </button>
+                    </div>
+                    <div class="assignment-meta-item priority-highlight">
+                        <span class="assignment-meta-label">Hạn nộp</span>
+                        <span class="assignment-meta-value">${formatDate(assignment.duedate)}</span>
+                    </div>
+                    <div class="assignment-meta-item priority-highlight status-${assignment.isSubmitted ? 'submitted' : 'pending'}">
+                        <span class="assignment-meta-label">Trạng thái</span>
+                        <span class="assignment-meta-value">${assignment.isSubmitted ? 'Đã nộp' : 'Chưa nộp'}</span>
+                    </div>
+                </div>
+                
+                
+                <!-- Secondary Information -->
+                <div class="meta-secondary">
+                    ${assignment.isSubmitted && assignment.submittedTime ? `
+                    <div class="assignment-meta-item">
+                        <span class="assignment-meta-label">Thời gian nộp</span>
+                        <span class="assignment-meta-value">${formatDate(assignment.submittedTime)}</span>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+            
+            ${assignment.intro ? `
+            <div class="assignment-description">
+                <h4>Mô tả bài tập</h4>
+                <div class="assignment-description-content">${assignment.intro}</div>
+            </div>
+            ` : ''}
+            <div class="details-section">
+                <h4>Ghi chú cá nhân</h4>
+                <textarea id="assignment-page-notes" placeholder="Thêm ghi chú cho bài tập này..." onchange="saveAssignmentPageNotes(${assignment.id}, this.value)"></textarea>
+                <div class="notes-status" id="assignment-notes-status"></div>
+                <div class="notes-actions-row notes-actions-equal">
+                    <button class="btn btn-outline btn-small btn-note-action" id="btn-open-assignment-word" onclick="ensureAssignmentNoteDoc(${assignment.id}, '${(assignment.name||'').replace(/['"\\]/g,'') || 'Bai tap'}')">
+                        <i class="fas fa-file-word"></i> Mở ghi chú Word
+                    </button>
+                    <button class="btn btn-danger btn-small btn-note-action" id="btn-del-assignment-word" onclick="deleteAssignmentNoteDoc(${assignment.id})">
+                        <i class="fas fa-trash"></i> Xóa ghi chú Word
+                    </button>
+                    <span id="assignment-word-indicator" class="file-badge" title="Trạng thái file ghi chú"></span>
+                </div>
+            </div>
+
+            
+            
+            ${assignment.introattachments && assignment.introattachments.length > 0 ? `
+            <div class="assignment-attachments">
+                <h4>Tài liệu đính kèm</h4>
+                <div class="attachment-list">
+                    ${assignment.introattachments.map(attachment => `
+                        <div class="attachment-item">
+                            <i class="fas fa-file"></i>
+                            <a href="${ensureUrlWithToken(attachment.fileurl)}" target="_blank" rel="noopener" download>${attachment.filename}</a>
+                            <span class="attachment-size">(${Math.round(attachment.filesize/1024)} KB)</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            ` : ''}
+        </div>
+            `;
+        }
+        
+        // Show assignment details section
+        showSection('assignment-details');
+        
+        // Initialize countdown if not submitted
+        if (!assignment.isSubmitted) {
+            initializeHeaderCountdown(assignment.id, assignment.duedate);
+        }
+        // Load existing notes for this assignment
+        try {
+            const enh = await window.electronAPI.getAssignmentEnhancements(String(assignment.id));
+            if (enh?.success && enh.data && typeof enh.data.notes === 'string') {
+                const ta = document.getElementById('assignment-page-notes');
+                if (ta) ta.value = enh.data.notes;
+            }
+        } catch {}
+
+        // Enhance notes UX: autosize + debounced autosave on input
+        try {
+            const ta = document.getElementById('assignment-page-notes');
+            if (ta) {
+                initAutosizeTextarea(ta);
+                const debounced = debounce((val) => saveAssignmentPageNotes(assignment.id, val), 600);
+                ta.addEventListener('input', () => debounced(ta.value));
+            }
+        } catch {}
+
+        // Update Word note indicator & delete state for assignment
+        try {
+            const settings = await window.electronAPI.getSettings();
+            const path = settings?.[`assignmentNoteDoc_${assignment.id}`];
+            const ind = document.getElementById('assignment-word-indicator');
+            const del = document.getElementById('btn-del-assignment-word');
+            if (path) {
+                if (ind) ind.textContent = 'Đã có file';
+                if (ind) ind.classList.add('success');
+                if (del) del.disabled = false;
+            } else {
+                if (ind) ind.textContent = 'Chưa có file';
+                if (ind) ind.classList.remove('success');
+                if (del) del.disabled = true;
+            }
+        } catch {}
+        
+    } catch (error) {
+        console.error('Error in showAssignmentDetailsPage:', error);
+        showNotification('Lỗi hiển thị chi tiết bài tập', 'error');
+    }
+}
+
+// Save notes from assignment details page
+async function saveAssignmentPageNotes(assignmentId, notes) {
+    try {
+        setNotesStatus('assignment-notes-status', 'Đang lưu...');
+        await window.electronAPI.setAssignmentNotes(String(assignmentId), notes || '');
+        const t = new Date();
+        setNotesStatus('assignment-notes-status', `Đã lưu lúc ${t.toLocaleTimeString('vi-VN')}`, 'success');
+    } catch (e) {
+        setNotesStatus('assignment-notes-status', 'Lỗi lưu ghi chú', 'error');
+    }
+}
+
+// Open submission (editsubmission) page in external browser
+async function openSubmission(assignmentId) {
+    try {
+        const numericId = Number(assignmentId);
+        let assignment = appState.assignments.find(a => a.id === numericId);
+        // Fallback: try load from courses
+        if (!assignment) {
+            for (const course of appState.courses) {
+                try {
+                    const list = await loadAssignmentsForCourse(course.id);
+                    const found = list.find(a => a.id === numericId);
+                    if (found) { assignment = found; break; }
+                } catch {}
+            }
+        }
+        if (!assignment) {
+            showNotification('Không tìm thấy bài tập', 'error');
+            return;
+        }
+        let openUrl = assignment.url || (assignment.cmid ? `${appState.baseUrl}/mod/assign/view.php?id=${assignment.cmid}` : null);
+        if (openUrl) {
+            // Prefer going straight to edit submission if possible
+            const sep = openUrl.includes('?') ? '&' : '?';
+            openUrl = `${openUrl}${sep}action=editsubmission`;
+            window.electronAPI.openExternal(openUrl);
+        } else {
+            showNotification('Không có liên kết nộp bài', 'warning');
+        }
+    } catch (e) {
+        console.error('openSubmission error', e);
+        showNotification('Lỗi mở trang nộp bài', 'error');
+    }
+}
+
+// Course notes helpers
+async function saveCourseNotes(courseId, notes) {
+    try {
+        setNotesStatus('course-notes-status', 'Đang lưu...');
+        await window.electronAPI.setSetting(`courseNote_${courseId}`, notes || '');
+        const t = new Date();
+        setNotesStatus('course-notes-status', `Đã lưu lúc ${t.toLocaleTimeString('vi-VN')}`, 'success');
+    } catch (e) {
+        setNotesStatus('course-notes-status', 'Lỗi lưu ghi chú môn học', 'error');
+    }
+}
+
+async function loadCourseNotes(courseId) {
+    try {
+        const val = await window.electronAPI.getSetting(`courseNote_${courseId}`);
+        const ta = document.getElementById('course-notes-textarea');
+        if (ta && typeof val === 'string') ta.value = val;
+        if (ta) {
+            initAutosizeTextarea(ta);
+            const debounced = debounce((v) => saveCourseNotes(courseId, v), 600);
+            ta.addEventListener('input', () => debounced(ta.value));
+        }
+    } catch {}
+}
+
+// Word-backed notes helpers (open/create and delete)
+async function ensureCourseNoteDoc(courseId, courseName) {
+    try {
+        setNotesStatus('course-notes-status', 'Đang mở ghi chú Word...', 'muted');
+        const res = await window.electronAPI.ensureCourseNoteDoc(String(courseId), String(courseName || ''));
+        if (res && res.success) {
+            setNotesStatus('course-notes-status', 'Đã mở ghi chú Word', 'success');
+            // Reflect badge status
+            setNotesStatus('course-word-indicator', 'Đã có file', 'success');
+            const del = document.getElementById('btn-del-course-word');
+            if (del) del.disabled = false;
+        } else if (res && res.cancelled) {
+            setNotesStatus('course-notes-status', 'Đã hủy', 'muted');
+        } else {
+            setNotesStatus('course-notes-status', 'Không thể mở ghi chú Word', 'error');
+        }
+    } catch (e) {
+        setNotesStatus('course-notes-status', 'Lỗi mở ghi chú Word', 'error');
+    }
+}
+
+async function deleteCourseNoteDoc(courseId) {
+    try {
+        const res = await window.electronAPI.deleteCourseNoteDoc(String(courseId));
+        if (res && res.success) {
+            setNotesStatus('course-notes-status', 'Đã xóa file ghi chú Word', 'success');
+            setNotesStatus('course-word-indicator', 'Chưa có file', 'muted');
+            const del = document.getElementById('btn-del-course-word');
+            if (del) del.disabled = true;
+        } else if (res && res.cancelled) {
+            setNotesStatus('course-notes-status', 'Đã hủy', 'muted');
+        }
+    } catch (e) {
+        setNotesStatus('course-notes-status', 'Lỗi xóa ghi chú Word', 'error');
+    }
+}
+
+async function ensureAssignmentNoteDoc(assignmentId, name) {
+    try {
+        setNotesStatus('assignment-notes-status', 'Đang mở ghi chú Word...', 'muted');
+        const res = await window.electronAPI.ensureAssignmentNoteDoc(String(assignmentId), String(name || ''));
+        if (res && res.success) {
+            setNotesStatus('assignment-notes-status', 'Đã mở ghi chú Word', 'success');
+            setNotesStatus('assignment-word-indicator', 'Đã có file', 'success');
+            const del = document.getElementById('btn-del-assignment-word');
+            if (del) del.disabled = false;
+        } else if (res && res.cancelled) {
+            setNotesStatus('assignment-notes-status', 'Đã hủy', 'muted');
+        } else {
+            setNotesStatus('assignment-notes-status', 'Không thể mở ghi chú Word', 'error');
+        }
+    } catch (e) {
+        setNotesStatus('assignment-notes-status', 'Lỗi mở ghi chú Word', 'error');
+    }
+}
+
+async function deleteAssignmentNoteDoc(assignmentId) {
+    try {
+        const res = await window.electronAPI.deleteAssignmentNoteDoc(String(assignmentId));
+        if (res && res.success) {
+            setNotesStatus('assignment-notes-status', 'Đã xóa file ghi chú Word', 'success');
+            setNotesStatus('assignment-word-indicator', 'Chưa có file', 'muted');
+            const del = document.getElementById('btn-del-assignment-word');
+            if (del) del.disabled = true;
+        } else if (res && res.cancelled) {
+            setNotesStatus('assignment-notes-status', 'Đã hủy', 'muted');
+        }
+    } catch (e) {
+        setNotesStatus('assignment-notes-status', 'Lỗi xóa ghi chú Word', 'error');
+    }
+}
+
+function initializeHeaderCountdown(assignmentId, dueDate) {
+    const countdownElement = document.getElementById(`header-countdown-${assignmentId}`);
+    if (!countdownElement) return;
+    
+    const dueTime = new Date(dueDate * 1000).getTime();
+    
+    function updateCountdown() {
+        const now = new Date().getTime();
+        const timeLeft = dueTime - now;
+        
+        if (timeLeft <= 0) {
+            countdownElement.innerHTML = '<div class="countdown-expired">Đã hết hạn</div>';
+            return;
+        }
+        
+    const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+        
+        const daysElement = countdownElement.querySelector('.countdown-days');
+        const hoursElement = countdownElement.querySelector('.countdown-hours');
+        const minutesElement = countdownElement.querySelector('.countdown-minutes');
+        
+        if (daysElement) daysElement.textContent = days;
+        if (hoursElement) hoursElement.textContent = hours;
+        if (minutesElement) minutesElement.textContent = minutes;
+        
+        // Add urgency styling based on settings
+        countdownElement.classList.remove('urgent', 'warning');
+        const urgentDays = Number(appState.urgentDays) || 3;
+        if (days <= urgentDays) {
+            countdownElement.classList.add('urgent');
+        } else if (days <= 7) {
+            countdownElement.classList.add('warning');
+        }
+    }
+    
+    // Update immediately
+    updateCountdown();
+    
+    // Update every minute
+    const interval = setInterval(updateCountdown, 60000);
+    
+    // Store interval for cleanup
+    if (!window.countdownIntervals) {
+        window.countdownIntervals = {};
+    }
+    window.countdownIntervals[assignmentId] = interval;
+}
+
+function initializeAssignmentCountdown(assignmentId, dueDate) {
+    const countdownElement = document.getElementById(`countdown-${assignmentId}`);
+    if (!countdownElement) return;
+    
+    const dueTime = new Date(dueDate * 1000).getTime();
+    
+    function updateCountdown() {
+        const now = new Date().getTime();
+        const timeLeft = dueTime - now;
+        
+        if (timeLeft <= 0) {
+            countdownElement.innerHTML = '<i class="fas fa-clock"></i><span class="countdown-text">Đã hết hạn</span>';
+            countdownElement.classList.add('expired');
+            return;
+        }
+        
+    const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+        
+        const countdownText = countdownElement.querySelector('.countdown-text');
+        if (countdownText) {
+            countdownText.textContent = `${days} ngày ${hours} giờ ${minutes} phút`;
+        }
+        
+        // Add urgency styling based on settings
+        countdownElement.classList.remove('urgent', 'warning');
+        const urgentDays = Number(appState.urgentDays) || 3;
+        if (days <= urgentDays) {
+            countdownElement.classList.add('urgent');
+        } else if (days <= 7) {
+            countdownElement.classList.add('warning');
+        }
+    }
+    
+    // Update immediately
+    updateCountdown();
+    
+    // Update every minute
+    const interval = setInterval(updateCountdown, 60000);
+    
+    // Store interval for cleanup
+    if (!window.assignmentCountdownIntervals) {
+        window.assignmentCountdownIntervals = {};
+    }
+    window.assignmentCountdownIntervals[assignmentId] = interval;
+}
+
+function closeAssignmentDetails() {
+    assignmentEnhancements.close();
+    
+    // Clear countdown intervals
+    if (window.countdownIntervals) {
+        Object.values(window.countdownIntervals).forEach(interval => {
+            clearInterval(interval);
+        });
+        window.countdownIntervals = {};
+    }
+    
+    // Clear assignment countdown intervals
+    if (window.assignmentCountdownIntervals) {
+        Object.values(window.assignmentCountdownIntervals).forEach(interval => {
+            clearInterval(interval);
+        });
+        window.assignmentCountdownIntervals = {};
+    }
+}
+
+// Ensure global accessibility for inline onclick handlers
+window.openCourseDetails = openCourseDetails;
+window.openCourseInBrowser = openCourseInBrowser;
+window.openCourseInApp = openCourseInApp;
+window.openSubmission = openSubmission;
+
+function setAssignmentPriority(priority) {
+    assignmentEnhancements.setPriority(priority);
+}
+
+function saveAssignmentNotes(notes) {
+    assignmentEnhancements.saveNotes(notes);
+}
+
+function addSubtask() {
+    const input = document.getElementById('new-subtask-input');
+    assignmentEnhancements.addSubtask(input.value);
+}
+
+function handleSubtaskKeypress(event) {
+    if (event.key === 'Enter') {
+        addSubtask();
+    }
+}
+
+function toggleSubtask(subtaskId, completed) {
+    assignmentEnhancements.toggleSubtask(subtaskId, completed);
+}
+
+function deleteSubtask(subtaskId) {
+    if (confirm('Bạn có chắc chắn muốn xóa công việc này?')) {
+        assignmentEnhancements.deleteSubtask(subtaskId);
+    }
+}
+
+function editSubtask(subtaskId) {
+    const subtask = assignmentEnhancements.currentEnhancements.subtasks.find(st => st.id === subtaskId);
+    if (subtask) {
+        const newText = prompt('Sửa công việc:', subtask.text);
+        if (newText && newText.trim() !== subtask.text) {
+            assignmentEnhancements.updateSubtask(subtaskId, { text: newText.trim() });
+        }
+    }
+}
+
+function toggleReminder(enabled) {
+    const hoursBefore = document.getElementById('reminder-time').value;
+    assignmentEnhancements.setReminder(enabled, parseInt(hoursBefore));
+    
+    const options = document.getElementById('reminder-options');
+    if (enabled) {
+        options.classList.remove('hidden');
+    } else {
+        options.classList.add('hidden');
+    }
+}
+
+function updateReminderTime() {
+    const enabled = document.getElementById('enable-reminder').checked;
+    const hoursBefore = document.getElementById('reminder-time').value;
+    if (enabled) {
+        assignmentEnhancements.setReminder(true, parseInt(hoursBefore));
+    }
+}
+
+// Quick Notes functions
+function openQuickNotes() {
+    document.getElementById('quick-notes-modal').classList.remove('hidden');
+    // Load saved notes
+    const savedNotes = localStorage.getItem('quickNotes') || '';
+    document.getElementById('quick-notes-text').value = savedNotes;
+}
+
+function closeQuickNotes() {
+    document.getElementById('quick-notes-modal').classList.add('hidden');
+}
+
+function saveQuickNotes() {
+    const notes = document.getElementById('quick-notes-text').value;
+    localStorage.setItem('quickNotes', notes);
+    showNotification('Đã lưu ghi chú nhanh', 'success');
+    closeQuickNotes();
+}
+
+// AI Assistant functions
+async function openAIStudyPlan() {
+    document.getElementById('ai-study-plan-modal').classList.remove('hidden');
+    await generateAIStudyPlan();
+}
+
+function closeAIStudyPlan() {
+    document.getElementById('ai-study-plan-modal').classList.add('hidden');
+}
+
+async function refreshAIStudyPlan() {
+    await generateAIStudyPlan();
+}
+
+async function generateAIStudyPlan() {
+    const content = document.getElementById('ai-study-plan-content');
+    content.innerHTML = `
+        <div class="ai-loading">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>AI đang phân tích và tạo lịch ôn tập...</p>
+        </div>
+    `;
+
+    try {
+        console.log('Generating AI Study Plan:', {
+            assignments: appState.assignments.length,
+            courses: appState.courses.length
+        });
+        
+        const result = await window.electronAPI.aiGenerateStudyPlan(appState.assignments, appState.courses);
+        
+        if (result.success) {
+            renderAIStudyPlan(result.data);
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        console.error('AI Study Plan Error:', error);
+        content.innerHTML = `
+            <div class="ai-no-data">
+                <i class="fas fa-exclamation-triangle"></i>
+                <h3>Lỗi tạo lịch ôn tập</h3>
+                <p>${error.message}</p>
+                <button class="btn btn-primary" onclick="refreshAIStudyPlan()">
+                    <i class="fas fa-retry"></i>
+                    Thử lại
+                </button>
+            </div>
+        `;
+    }
+}
+
+function renderAIStudyPlan(data) {
+    const content = document.getElementById('ai-study-plan-content');
+    
+    if (!data.plan || data.plan.length === 0) {
+        content.innerHTML = `
+            <div class="ai-no-data">
+                <i class="fas fa-check-circle"></i>
+                <h3>Tuyệt vời!</h3>
+                <p>Không có bài tập nào sắp đến hạn. Bạn có thể tận dụng thời gian để ôn tập kiến thức cũ.</p>
+            </div>
+        `;
+        return;
+    }
+
+    const statsHtml = `
+        <div class="ai-stats">
+            <div class="ai-stat-item">
+                <div class="ai-stat-number">${data.urgentCount || 0}</div>
+                <div class="ai-stat-label">Cần ưu tiên cao</div>
+            </div>
+            <div class="ai-stat-item">
+                <div class="ai-stat-number">${data.totalUpcoming || 0}</div>
+                <div class="ai-stat-label">Bài tập sắp tới</div>
+            </div>
+            <div class="ai-stat-item">
+                <div class="ai-stat-number">${data.plan.length}</div>
+                <div class="ai-stat-label">Trong lịch ôn tập</div>
+            </div>
+        </div>
+    `;
+
+    const scheduleHtml = data.plan.map(item => `
+        <div class="ai-schedule-item">
+            <div class="ai-schedule-header">
+                <div class="ai-schedule-title">${item.assignment}</div>
+                <div class="ai-schedule-priority ${item.priority.toLowerCase()}">${item.priority}</div>
+            </div>
+            <div class="ai-schedule-meta">
+                <span><i class="fas fa-book"></i> ${item.course}</span>
+                <span><i class="fas fa-clock"></i> Còn ${item.daysLeft} ngày</span>
+            </div>
+            <div class="ai-schedule-recommendation">
+                <i class="fas fa-lightbulb"></i> ${item.recommendation}
+            </div>
+        </div>
+    `).join('');
+
+    const suggestionsHtml = data.suggestions.map(suggestion => `
+        <div class="ai-suggestion-item">
+            <i class="fas fa-info-circle"></i>
+            <span>${suggestion}</span>
+        </div>
+    `).join('');
+
+    content.innerHTML = `
+        <div class="ai-summary-section">
+            <h4><i class="fas fa-chart-bar"></i> Tổng quan</h4>
+            ${statsHtml}
+        </div>
+
+        <div class="ai-summary-section">
+            <h4><i class="fas fa-calendar-alt"></i> Lịch ôn tập được đề xuất</h4>
+            <div class="ai-study-schedule">
+                ${scheduleHtml}
+            </div>
+        </div>
+
+        <div class="ai-summary-section">
+            <h4><i class="fas fa-lightbulb"></i> Gợi ý thông minh</h4>
+            <div class="ai-suggestions">
+                ${suggestionsHtml}
+            </div>
+        </div>
+    `;
+}
+
+// AI Content Summarization
+async function summarizeContentWithAI(content, type = 'announcement') {
+    try {
+        const result = await window.electronAPI.aiSummarizeContent(content, type);
+        if (result.success) {
+            return result.data;
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        console.error('AI summarization error:', error);
+        return {
+            summary: 'Không thể tóm tắt nội dung này.',
+            keyWords: [],
+            sentiment: 'neutral',
+            wordCount: 0,
+            confidence: 0
+        };
+    }
+}
+
+// POLLING & NOTIFICATIONS
+async function checkForNewContent() {
+    if (!appState.currentToken || !appState.siteInfo?.userid) return;
+    
+    try {
+        // Use smart notification system
+        await smartNotifications.checkForChanges();
+        
+        appState.lastCheckTime = Date.now();
+    } catch (error) {
+        console.error('Error checking for new content:', error);
+    }
+}
+
+function startPolling() {
+    if (appState.pollingInterval) {
+        clearInterval(appState.pollingInterval);
+    }
+    
+    const settings = getNotificationSettings();
+    if (!settings.enabled) return;
+    
+    const intervalMs = settings.interval * 60 * 1000; // convert minutes to ms
+    appState.pollingInterval = setInterval(checkForNewContent, intervalMs);
+    
+    // Initial check after 10 seconds
+    setTimeout(checkForNewContent, 10000);
+}
+
+function stopPolling() {
+    if (appState.pollingInterval) {
+        clearInterval(appState.pollingInterval);
+        appState.pollingInterval = null;
+    }
+}
+
+function getNotificationSettings() {
+    // This would normally read from settings, but for now return defaults
+    return { enabled: true, interval: 5 };
+}
+
+// Calendar Export Functions
+function exportCalendar() {
+    try {
+        const icsContent = generateICSContent();
+        const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `UIT-Assignments-${new Date().toISOString().split('T')[0]}.ics`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showNotification('Đã xuất lịch thành công!', 'success');
+    } catch (error) {
+        showNotification(`Lỗi xuất lịch: ${error.message}`, 'error');
+    }
+}
+
+function generateICSContent() {
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    
+    let ics = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//UIT Assignment Manager//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH'
+    ];
+    
+    appState.assignments.forEach(assignment => {
+        if (!assignment.duedate) return;
+        
+        const dueDate = new Date(assignment.duedate * 1000);
+        const startDate = dueDate.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+        const endDate = new Date(dueDate.getTime() + 2 * 60 * 60 * 1000).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+        
+        const course = appState.courses.find(c => c.id === assignment.course);
+        const courseName = course ? course.fullname : 'Unknown Course';
+        
+        ics.push(
+            'BEGIN:VEVENT',
+            `UID:${assignment.id}@uit-assignment-manager`,
+            `DTSTAMP:${timestamp}`,
+            `DTSTART:${startDate}`,
+            `DTEND:${endDate}`,
+            `SUMMARY:${assignment.name}`,
+            `DESCRIPTION:Course: ${courseName}\\nStatus: ${assignment.status}`,
+            'STATUS:CONFIRMED',
+            'TRANSP:OPAQUE',
+            'END:VEVENT'
+        );
+    });
+    
+    ics.push('END:VCALENDAR');
+    return ics.join('\r\n');
+}
+
+// Quick Actions Functions
+function openQuickNotes() {
+    const note = prompt('Ghi chú nhanh:');
+    if (note && note.trim()) {
+        // Store note in localStorage for now
+        const notes = JSON.parse(localStorage.getItem('quickNotes') || '[]');
+        notes.push({
+            id: Date.now(),
+            text: note.trim(),
+            timestamp: new Date().toISOString(),
+            type: 'quick'
+        });
+        localStorage.setItem('quickNotes', JSON.stringify(notes));
+        showNotification('Đã lưu ghi chú!', 'success');
+    }
+}
+
+function openQuickSchedule() {
+    document.getElementById('quick-schedule-modal').classList.remove('hidden');
+    
+    // Populate assignment dropdown
+    const assignmentSelect = document.getElementById('schedule-assignment');
+    assignmentSelect.innerHTML = '<option value="">Chọn bài tập...</option>';
+    
+    appState.assignments.forEach(assignment => {
+        const option = document.createElement('option');
+        option.value = assignment.id;
+        option.textContent = assignment.name;
+        assignmentSelect.appendChild(option);
+    });
+    
+    // Set default time to tomorrow
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    document.getElementById('schedule-time').value = tomorrow.toISOString().slice(0, 16);
+}
+
+function closeQuickSchedule() {
+    document.getElementById('quick-schedule-modal').classList.add('hidden');
+}
+
+function saveQuickSchedule() {
+    const assignmentId = document.getElementById('schedule-assignment').value;
+    const scheduleTime = document.getElementById('schedule-time').value;
+    const message = document.getElementById('schedule-message').value || 'Nhắc nhở bài tập';
+    
+    if (!scheduleTime) {
+        showNotification('Vui lòng chọn thời gian nhắc nhở', 'error');
+        return;
+    }
+    
+    // Store schedule in localStorage
+    const schedules = JSON.parse(localStorage.getItem('schedules') || '[]');
+    schedules.push({
+        id: Date.now(),
+        assignmentId: assignmentId || null,
+        scheduleTime: scheduleTime,
+        message: message,
+        timestamp: new Date().toISOString()
+    });
+    localStorage.setItem('schedules', JSON.stringify(schedules));
+    
+    showNotification('Đã lên lịch nhắc nhở!', 'success');
+    closeQuickSchedule();
+}
+
+function exportReport() {
+    try {
+        const report = generateReport();
+        const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `UIT-Report-${new Date().toISOString().split('T')[0]}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showNotification('Đã xuất báo cáo thành công!', 'success');
+    } catch (error) {
+        showNotification(`Lỗi xuất báo cáo: ${error.message}`, 'error');
+    }
+}
+
+function generateReport() {
+    const now = new Date();
+    const stats = calculateSmartStats();
+    
+    let report = [
+        '=== BÁO CÁO HỌC TẬP UIT ===',
+        `Ngày tạo: ${now.toLocaleString('vi-VN')}`,
+        `Sinh viên: ${appState.currentUser?.fullname || 'N/A'}`,
+        `Mã số sinh viên: ${appState.currentStudentId || 'N/A'}`,
+        '',
+        '=== THỐNG KÊ TỔNG QUAN ===',
+        `Tổng số môn học: ${appState.courses.length}`,
+        `Tổng số bài tập: ${appState.assignments.length}`,
+        `Bài tập đã hoàn thành: ${stats.completedAssignments.length}`,
+        `Bài tập khẩn cấp: ${stats.urgentAssignments.length}`,
+        `Bài tập sắp đến hạn: ${stats.upcomingAssignments.length}`,
+        `Tỷ lệ hoàn thành: ${stats.completionRate}%`,
+        '',
+        '=== BÀI TẬP KHẨN CẤP ==='
+    ];
+    
+    if (stats.urgentAssignments.length > 0) {
+        stats.urgentAssignments.forEach(assignment => {
+            const course = appState.courses.find(c => c.id === assignment.course);
+            report.push(`- ${assignment.name} (${course?.fullname || 'Unknown'}) - Hạn: ${formatDate(assignment.duedate)}`);
+        });
+    } else {
+        report.push('Không có bài tập khẩn cấp');
+    }
+    
+    report.push('', '=== BÀI TẬP SẮP ĐẾN HẠN ===');
+    
+    if (stats.upcomingAssignments.length > 0) {
+        stats.upcomingAssignments.forEach(assignment => {
+            const course = appState.courses.find(c => c.id === assignment.course);
+            report.push(`- ${assignment.name} (${course?.fullname || 'Unknown'}) - Hạn: ${formatDate(assignment.duedate)}`);
+        });
+    } else {
+        report.push('Không có bài tập sắp đến hạn');
+    }
+    
+    report.push('', '=== CHI TIẾT THEO MÔN HỌC ===');
+    
+    appState.courses.forEach(course => {
+        const courseAssignments = appState.assignments.filter(a => a.course === course.id);
+        if (courseAssignments.length > 0) {
+            report.push(`\n${course.fullname}:`);
+            courseAssignments.forEach(assignment => {
+                const status = assignment.status === 'submitted' ? 'Đã nộp' : 'Chưa nộp';
+                report.push(`  - ${assignment.name} (${status}) - Hạn: ${formatDate(assignment.duedate)}`);
+            });
+        }
+    });
+    
+    return report.join('\n');
+}
+
+function logout() {
+    stopPolling();
+    
+    appState.currentUser = null;
+    appState.currentToken = null;
+    appState.currentStudentId = null;
+    appState.siteInfo = null;
+    appState.categories = [];
+    appState.semesters = [];
+    appState.courses = [];
+    appState.assignments = [];
+    appState.categoryMap.clear();
+    appState.courseSemMap.clear();
+    appState.coursesByCategory.clear();
+    appState.lastCheckTime = null;
+    appState.userGroupAssignments.clear();
+    appState.currentWeek = new Date();
+    appState.currentMonth = new Date();
+    appState.dashboardData = {
+        urgentAssignments: [],
+        upcomingAssignments: [],
+        completedAssignments: [],
+        completionRate: 0,
+        semesterProgress: 0
+    };
+    
+    elements.mainApp.classList.add('hidden');
+    elements.loginScreen.classList.remove('hidden');
+    
+    showNotification('Đã đăng xuất', 'info');
+}
+
+// Event listeners
+function setupEventListeners() {
+    // Login form events
+    elements.registerBtn.addEventListener('click', async () => {
+        const studentId = elements.newStudentId.value.trim();
+        const token = elements.newToken.value.trim();
+        
+        if (!studentId || !token) {
+            showNotification('Vui lòng nhập đầy đủ thông tin', 'warning');
+            return;
+        }
+        
+        await registerAccount(studentId, token);
+    });
+    
+    elements.loginBtn.addEventListener('click', async () => {
+        const studentId = elements.studentId.value;
+        
+        if (!studentId) {
+            showNotification('Vui lòng chọn mã số sinh viên', 'warning');
+            return;
+        }
+        
+        await loginWithStudentId(studentId);
+    });
+    
+    elements.switchToLogin.addEventListener('click', (e) => {
+        e.preventDefault();
+        switchToLoginForm();
+    });
+    
+    elements.switchToRegister.addEventListener('click', (e) => {
+        e.preventDefault();
+        switchToRegisterForm();
+    });
+    
+    elements.removeAccountBtn.addEventListener('click', removeAccount);
+    
+    // Main app events
+    elements.logoutBtn.addEventListener('click', logout);
+    
+    // Navigation events
+    elements.navItems.forEach(item => {
+        item.addEventListener('click', () => {
+            const section = item.dataset.section;
+            showSection(section);
+            
+            // Load section-specific data
+            if (section === 'assignments') {
+                updateAssignmentsList();
+            } else if (section === 'info') {
+                populateInfoCourseSelect();
+                // Always load unified feed when switching to info tab
+                loadUnifiedFeed();
+            }
+        });
+    });
+
+    document.querySelectorAll('.dq-link').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const s = btn.getAttribute('data-nav-section');
+            if (!s) return;
+            const navEl = document.querySelector(`.sidebar-nav .nav-item[data-section="${s}"]`);
+            if (navEl) navEl.click();
+        });
+    });
+
+    if (elements.stcRefreshGrades) {
+        elements.stcRefreshGrades.addEventListener('click', async () => {
+            try {
+                await stcFetchAll({ force: true });
+                renderGrades();
+                showNotification('Đã làm mới điểm', 'success');
+            } catch (e) {
+                showNotification(e.message || 'Không thể làm mới', 'error');
+            }
+        });
+    }
+    if (elements.gradesSearch) {
+        elements.gradesSearch.addEventListener('input', () => renderGrades());
+    }
+    if (elements.stcRefreshUpdates) {
+        elements.stcRefreshUpdates.addEventListener('click', async () => {
+            try {
+                const data = await stcFetchAll({ force: true });
+                appState.scheduleOverrides = normalizeScheduleUpdatesFromNotify(data?.notify);
+                renderScheduleUpdates();
+                showNotification('Đã làm mới', 'success');
+            } catch (e) {
+                showNotification(e.message || 'Không thể làm mới', 'error');
+            }
+        });
+    }
+    if (elements.scheduleUpdatesSearch) {
+        elements.scheduleUpdatesSearch.addEventListener('input', () => renderScheduleUpdates());
+    }
+    if (elements.scheduleUpdatesType) {
+        elements.scheduleUpdatesType.addEventListener('change', () => renderScheduleUpdates());
+    }
+    if (elements.scheduleUpdatesCourse) {
+        elements.scheduleUpdatesCourse.addEventListener('change', () => renderScheduleUpdates());
+    }
+    if (elements.scheduleUpdatesSort) {
+        elements.scheduleUpdatesSort.addEventListener('change', () => renderScheduleUpdates());
+    }
+    if (elements.scheduleUpdatesRange) {
+        elements.scheduleUpdatesRange.addEventListener('change', () => renderScheduleUpdates());
+    }
+    if (elements.assignmentsRefreshBtn) {
+        elements.assignmentsRefreshBtn.addEventListener('click', async () => {
+            try {
+                await updateAssignmentsList({ force: true });
+                showNotification('Đã làm mới danh sách bài tập', 'success');
+            } catch (e) {
+                showNotification(e?.message || 'Không thể làm mới', 'error');
+            }
+        });
+    }
+    if (elements.gradesSemester) {
+        elements.gradesSemester.addEventListener('change', () => renderGrades());
+    }
+    if (elements.gradesSort) {
+        elements.gradesSort.addEventListener('change', () => renderGrades());
+    }
+
+    const openStcProfile = async (e) => {
+        try { e?.stopPropagation?.(); } catch {}
+        const modal = elements.stcProfileModal;
+        if (!modal) return;
+        modal.classList.remove('hidden');
+        requestAnimationFrame(() => {
+            modal.classList.add('showing');
+        });
+        await loadStcCachedProfileIntoUI();
+        const sid = String(appState.stc?.sid || '').trim();
+        if (sid) {
+            try { await fetchAndCacheStcProfile({ force: false }); } catch {}
+        }
+    };
+    if (elements.stcOpenProfileUpdates) elements.stcOpenProfileUpdates.addEventListener('click', openStcProfile);
+    if (elements.stcOpenProfileGrades) elements.stcOpenProfileGrades.addEventListener('click', openStcProfile);
+    if (elements.openStcProfileSettings) elements.openStcProfileSettings.addEventListener('click', openStcProfile);
+    const footerProfile = document.querySelector('.sidebar-footer .user-profile');
+    if (footerProfile) footerProfile.addEventListener('click', openStcProfile);
+    const closeStcProfile = (e) => {
+        try { e?.stopPropagation?.(); } catch {}
+        const modal = elements.stcProfileModal;
+        if (!modal) return;
+        modal.classList.remove('showing');
+        setTimeout(() => {
+            modal.classList.add('hidden');
+        }, 220);
+    };
+    if (elements.stcProfileClose) elements.stcProfileClose.addEventListener('click', closeStcProfile);
+    if (elements.stcProfileModal) {
+        elements.stcProfileModal.addEventListener('click', (e) => {
+            if (e.target === elements.stcProfileModal) closeStcProfile(e);
+        });
+    }
+    if (elements.stcProfileLogin) {
+        elements.stcProfileLogin.addEventListener('click', async () => {
+            const ok = await stcLoginFromProfile();
+            if (!ok) return;
+            try {
+                const data = await stcFetchAll({ force: true });
+                appState.scheduleOverrides = normalizeScheduleUpdatesFromNotify(data?.notify);
+                renderScheduleUpdates();
+                renderGrades();
+                updateSmartDashboard();
+                showNotification('Đã kết nối STC', 'success');
+            } catch (e) {
+                showNotification(e.message || 'Không thể tải dữ liệu', 'error');
+            }
+        });
+    }
+    if (elements.stcProfileClear) {
+        elements.stcProfileClear.addEventListener('click', async () => {
+            const res = await window.electronAPI.stcClearCredentials();
+            if (!res?.success) {
+                showNotification(res?.error || 'Không thể xóa', 'error');
+                return;
+            }
+            appState.stc.allData = null;
+            appState.scheduleOverrides = [];
+            await loadStcAuthStateIntoForms();
+            await loadStcCachedProfileIntoUI();
+            renderGrades();
+            renderScheduleUpdates();
+            updateSmartDashboard();
+            showNotification('Đã xóa thông tin STC đã lưu', 'success');
+        });
+    }
+    
+    // Filter events
+    elements.semesterFilter.addEventListener('change', async () => { 
+        handleSemesterChangeForCourses(); 
+        const selectedSemId = Number(elements.semesterFilter.value);
+        if (selectedSemId) {
+            await loadAssignmentsForSemester(selectedSemId);
+        } else {
+            await loadAssignmentsForCurrentSemester();
+        }
+        updateAssignmentsList(); 
+    });
+    elements.courseFilter.addEventListener('change', updateAssignmentsList);
+    elements.statusFilter.addEventListener('change', updateAssignmentsList);
+    // Sorting order
+    if (elements.sortOrder) {
+        elements.sortOrder.addEventListener('change', (e) => {
+            const validValues = ['closest', 'farthest', 'newest', 'oldest'];
+            const v = validValues.includes(e.target.value) ? e.target.value : 'closest';
+            appState.sortOrder = v;
+            try { localStorage.setItem('sortOrder', v); } catch {}
+            showNotification('Đã áp dụng', 'success');
+            updateAssignmentsList();
+        });
+    }
+    
+    // Breadcrumb navigation
+    if (elements.breadcrumbNav) {
+        elements.breadcrumbNav.addEventListener('click', (e) => {
+            const breadcrumbItem = e.target.closest('.breadcrumb-item');
+            if (breadcrumbItem && breadcrumbItem.dataset.section) {
+                showSection(breadcrumbItem.dataset.section);
+            }
+        });
+    }
+    
+    // Global search
+    if (elements.globalSearch) {
+        elements.globalSearch.addEventListener('input', (e) => {
+            appState.searchQuery = e.target.value.toLowerCase();
+            elements.clearSearch.style.display = appState.searchQuery ? 'block' : 'none';
+            performGlobalSearch();
+        });
+    }
+    
+    // Clear search
+    if (elements.clearSearch) {
+        elements.clearSearch.addEventListener('click', () => {
+            elements.globalSearch.value = '';
+            appState.searchQuery = '';
+            elements.clearSearch.style.display = 'none';
+            performGlobalSearch();
+        });
+    }
+    
+    // Semester filter for courses
+    if (elements.semesterFilterCourses) {
+        elements.semesterFilterCourses.addEventListener('change', () => {
+            filterCoursesBySemester();
+        });
+    }
+    // Toggle General Courses visibility
+    if (elements.toggleGeneralCourses) {
+        elements.toggleGeneralCourses.addEventListener('change', (e) => {
+            const section = document.getElementById('general-courses');
+            if (section) {
+                if (e.target.checked) section.style.display = '';
+                else section.style.display = 'none';
+                showNotification('Đã áp dụng', 'success');
+            }
+            try { localStorage.setItem('showGeneralCourses', String(e.target.checked)); } catch {}
+            updateCoursesList();
+        });
+    }
+    
+    // Group toggle button
+    if (elements.toggleGroupBtn) {
+        elements.toggleGroupBtn.addEventListener('click', () => {
+            appState.showGroupOnly = !appState.showGroupOnly;
+            const icon = elements.toggleGroupBtn.querySelector('i');
+            const span = elements.toggleGroupBtn.querySelector('span');
+            
+            if (appState.showGroupOnly) {
+                icon.className = 'fas fa-eye-slash';
+                span.textContent = 'Hiện tất cả';
+                elements.toggleGroupBtn.classList.add('active');
+            } else {
+                icon.className = 'fas fa-users';
+                span.textContent = 'Chỉ hiện bài tập nhóm';
+                elements.toggleGroupBtn.classList.remove('active');
+            }
+            
+            updateAssignmentsList();
+        });
+    }
+
+    // Info select (legacy)
+    if (elements.infoCourseSelect) {
+        elements.infoCourseSelect.addEventListener('change', (e) => loadCourseNotices(e.target.value));
+    }
+    
+    // Unified Feed events
+    if (elements.refreshFeedBtn) {
+        elements.refreshFeedBtn.addEventListener('click', loadUnifiedFeed);
+    }
+    
+    if (elements.exportFeedBtn) {
+        elements.exportFeedBtn.addEventListener('click', exportFeedData);
+    }
+
+    // Urgent days threshold setting
+    if (elements.urgentDaysThreshold) {
+        elements.urgentDaysThreshold.addEventListener('change', async (e) => {
+            const v = Math.max(1, Math.min(14, Number(e.target.value) || 3));
+            appState.urgentDays = v;
+            // persist to settings and localStorage
+            try {
+                await window.electronAPI.setSetting('urgentDaysThreshold', v);
+            } catch {}
+            try { localStorage.setItem('urgentDaysThreshold', String(v)); } catch {}
+            showNotification('Đã áp dụng', 'success');
+            updateMonthCalendar();
+            updateSmartDashboard();
+            updateAssignmentsList();
+        });
+    }
+
+    // App Update controls
+    const checkBtn = document.getElementById('check-update-btn');
+    const restartBtn = document.getElementById('restart-update-btn');
+    const progressRow = document.getElementById('update-progress-row');
+    const progressBar = document.getElementById('update-progress-bar');
+    const progressText = document.getElementById('update-progress-text');
+
+    if (checkBtn) {
+        checkBtn.addEventListener('click', async () => {
+            try {
+                checkBtn.disabled = true;
+                checkBtn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Đang kiểm tra...';
+                const res = await window.electronAPI.checkForUpdates();
+                if (!res || !res.success) {
+                    showNotification(res?.error || 'Không thể kiểm tra cập nhật', 'error');
+                }
+            } finally {
+                checkBtn.disabled = false;
+                checkBtn.innerHTML = '<i class=\"fas fa-sync-alt\"></i> Kiểm tra cập nhật';
+            }
+        });
+    }
+
+    if (restartBtn) {
+        restartBtn.addEventListener('click', async () => {
+            await window.electronAPI.quitAndInstall();
+        });
+    }
+
+    if (window.electronAPI.onUpdateAvailable) {
+        window.electronAPI.onUpdateAvailable(() => {
+            showNotification('Có bản cập nhật mới. Đang tải...', 'info');
+            if (progressRow) progressRow.style.display = 'flex';
+        });
+    }
+    if (window.electronAPI.onUpdateProgress) {
+        window.electronAPI.onUpdateProgress((p) => {
+            const percent = Math.floor(p.percent || 0);
+            if (progressBar) progressBar.style.width = `${percent}%`;
+            if (progressText) progressText.textContent = `${percent}%`;
+        });
+    }
+    if (window.electronAPI.onUpdateDownloaded) {
+        window.electronAPI.onUpdateDownloaded(() => {
+            showNotification('Tải xong bản cập nhật. Nhấn "Khởi động lại để cập nhật"', 'success');
+            if (restartBtn) restartBtn.style.display = 'inline-flex';
+        });
+    }
+    
+    if (elements.feedSearch) {
+        elements.feedSearch.addEventListener('input', (e) => {
+            appState.feedData.currentFilters.search = e.target.value;
+            applyFeedFilters();
+            updateFeedUI();
+            updateFeedStats();
+        });
+    }
+    
+    if (elements.clearSearch) {
+        elements.clearSearch.addEventListener('click', () => {
+            elements.feedSearch.value = '';
+            appState.feedData.currentFilters.search = '';
+            applyFeedFilters();
+            updateFeedUI();
+            updateFeedStats();
+        });
+    }
+    
+    if (elements.feedCourseFilter) {
+        elements.feedCourseFilter.addEventListener('change', (e) => {
+            appState.feedData.currentFilters.course = e.target.value;
+            applyFeedFilters();
+            updateFeedUI();
+            updateFeedStats();
+        });
+    }
+    
+    if (elements.feedSort) {
+        elements.feedSort.addEventListener('change', (e) => {
+            appState.feedData.currentFilters.sort = e.target.value;
+            applyFeedFilters();
+            updateFeedUI();
+        });
+    }
+    
+    // Filter chips
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('.filter-chip')) {
+            const chip = e.target.closest('.filter-chip');
+            const type = chip.dataset.type;
+            
+            // Update active state
+            document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+            
+            // Update filter
+            appState.feedData.currentFilters.type = type;
+            applyFeedFilters();
+            updateFeedUI();
+            updateFeedStats();
+        }
+    });
+    
+    // Refresh data
+    elements.refreshDataBtn.addEventListener('click', refreshData);
+    
+    // Export calendar
+    if (elements.exportCalendarBtn) {
+        elements.exportCalendarBtn.addEventListener('click', exportCalendar);
+    }
+
+    // Month calendar navigation
+    if (elements.prevMonth) {
+        elements.prevMonth.addEventListener('click', () => {
+            const d = appState.currentMonth;
+            appState.currentMonth = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+            updateMonthCalendar();
+        });
+    }
+    if (elements.nextMonth) {
+        elements.nextMonth.addEventListener('click', () => {
+            const d = appState.currentMonth;
+            appState.currentMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+            updateMonthCalendar();
+        });
+    }
+    
+    // AI Study Plan button
+    const aiStudyPlanBtn = document.getElementById('ai-study-plan');
+    if (aiStudyPlanBtn) {
+        aiStudyPlanBtn.addEventListener('click', openAIStudyPlan);
+    }
+    
+    // Change account
+    elements.changeAccountBtn.addEventListener('click', logout);
+
+    // Settings theme toggle
+    const settingsThemeBtn = document.getElementById('settings-theme-toggle');
+    if (settingsThemeBtn) settingsThemeBtn.addEventListener('click', toggleThemeInSettings);
+    
+    // Sidebar user profile click is reserved for STC profile modal
+
+    // TLS checkbox
+    if (elements.allowInsecureTLS) {
+        elements.allowInsecureTLS.addEventListener('change', async (e) => {
+            await window.electronAPI.setSetting('allowInsecureTLS', e.target.checked);
+            showNotification('Thiết lập TLS đã được lưu. Vui lòng thử lại thao tác.', 'info');
+        });
+    }
+    if (elements.baseUrlInput) {
+        elements.baseUrlInput.addEventListener('change', async (e) => {
+            const url = e.target.value.trim();
+            if (url) {
+                await window.electronAPI.setBaseUrl(url);
+                showNotification('Đã lưu Base URL. Vui lòng thử lại.', 'success');
+            }
+        });
+    }
+    if (elements.enableNotifications) {
+        elements.enableNotifications.addEventListener('change', async (e) => {
+            await window.electronAPI.setSetting('enableNotifications', e.target.checked);
+            showNotification('Đã lưu cài đặt thông báo.', 'success');
+            // Restart polling with new settings
+            if (appState.currentUser) {
+                stopPolling();
+                startPolling();
+            }
+                // Init timetable UI
+                await initTimetableUI();
+                
+                // Init exam schedule UI
+                await initExamScheduleUI();
+
+        });
+    }
+    if (elements.pollingInterval) {
+        elements.pollingInterval.addEventListener('change', async (e) => {
+            const interval = Math.max(1, Math.min(60, parseInt(e.target.value) || 5));
+            await window.electronAPI.setSetting('pollingInterval', interval);
+            showNotification('Đã lưu chu kỳ kiểm tra.', 'success');
+            // Restart polling with new interval
+            if (appState.currentUser) {
+                stopPolling();
+                startPolling();
+            }
+        });
+    }
+    
+    // Smart Notification event listeners
+    if (elements.enableToastNotifications) {
+        elements.enableToastNotifications.addEventListener('change', (e) => {
+            smartNotifications.settings.showToasts = e.target.checked;
+            smartNotifications.saveSettings();
+        });
+    }
+    
+    if (elements.enableInAppNotifications) {
+        elements.enableInAppNotifications.addEventListener('change', (e) => {
+            smartNotifications.settings.showInApp = e.target.checked;
+            smartNotifications.saveSettings();
+        });
+    }
+    
+    if (elements.enableNotificationSound) {
+        elements.enableNotificationSound.addEventListener('change', (e) => {
+            smartNotifications.settings.soundEnabled = e.target.checked;
+            smartNotifications.saveSettings();
+        });
+    }
+    
+    if (elements.notificationCheckInterval) {
+        elements.notificationCheckInterval.addEventListener('change', (e) => {
+            const interval = Math.max(1, Math.min(60, parseInt(e.target.value) || 5));
+            smartNotifications.settings.checkInterval = interval * 60 * 1000;
+            smartNotifications.saveSettings();
+        });
+    }
+    
+    if (elements.ignoreOldDays) {
+        elements.ignoreOldDays.addEventListener('change', (e) => {
+            const days = Math.max(1, Math.min(60, parseInt(e.target.value) || 7));
+            smartNotifications.settings.ignoreOldDays = days;
+            smartNotifications.saveSettings();
+        });
+    }
+    
+    if (elements.notifyNewAssignments) {
+        elements.notifyNewAssignments.addEventListener('change', (e) => {
+            smartNotifications.settings.notifyNewAssignments = e.target.checked;
+            smartNotifications.saveSettings();
+        });
+    }
+    
+    if (elements.notifyNewContent) {
+        elements.notifyNewContent.addEventListener('change', (e) => {
+            smartNotifications.settings.notifyNewContent = e.target.checked;
+            smartNotifications.saveSettings();
+        });
+    }
+    
+    if (elements.notifyUpcomingDeadlines) {
+        elements.notifyUpcomingDeadlines.addEventListener('change', (e) => {
+            smartNotifications.settings.notifyUpcomingDeadlines = e.target.checked;
+            smartNotifications.saveSettings();
+        });
+    }
+    
+    if (elements.testNotificationBtn) {
+        elements.testNotificationBtn.addEventListener('click', () => {
+            smartNotifications.testNotification();
+        });
+    }
+    
+    if (elements.clearNotificationHistoryBtn) {
+        elements.clearNotificationHistoryBtn.addEventListener('click', () => {
+            if (confirm('Bạn có chắc chắn muốn xóa lịch sử thông báo?')) {
+                // Clear notification history logic here
+                showNotification('Đã xóa lịch sử thông báo', 'success');
+            }
+        });
+    }
+    
+    // Enter key events
+    elements.newStudentId.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            elements.newToken.focus();
+        }
+    });
+    
+    elements.newToken.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            elements.registerBtn.click();
+        }
+    });
+}
+
+// COURSE DETAILS MODAL FUNCTIONS
+let currentCourseDetails = null;
+
+async function openCourseDetails(courseId) {
+    try {
+        showLoading('Đang mở chi tiết môn học...');
+        console.log('Opening course details for ID:', courseId);
+        const course = appState.courses.find(c => c.id === courseId);
+        if (!course) {
+            console.error('Course not found:', courseId);
+            showNotification('Không tìm thấy khóa học', 'error');
+            return;
+        }
+        console.log('Found course:', course.fullname);
+        currentCourseDetails = course;
+        appState.currentCourse = course;
+        console.log('Showing course details page');
+        await showCourseDetailsPage(course);
+    } catch (error) {
+        console.error('Error opening course details:', error);
+        showNotification('Lỗi tải thông tin môn học', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+async function showCourseDetailsPage(course) {
+    console.log('showCourseDetailsPage called for course:', course.fullname);
+    // Show loading quickly for rendering
+    showLoading('Đang tải nội dung khóa học...','course-loading');
+    try {
+        // Update title (guard elements may be missing after cleanup)
+        if (elements.courseDetailsTitle) {
+            elements.courseDetailsTitle.innerHTML = `<i class="fas fa-graduation-cap"></i> ${course.fullname}`;
+        }
+        // Update open course button if exists
+        if (elements.openCourseBtn) {
+            elements.openCourseBtn.onclick = () => openCourseInBrowser(course.id);
+        }
+        elements.courseDetailsContent.innerHTML = `
+            <div class="loading-placeholder">
+                <i class="fas fa-spinner fa-spin"></i>
+                <p>Đang tải nội dung khóa học...</p>
+            </div>
+        `;
+        showSection('course-details');
+        await loadCourseDetailsContent(course.id);
+    } finally {
+        hideLoading('course-loading');
+    }
+}
+
+function openCourseInBrowser(courseId) {
+    try {
+        showLoading('Đang mở trên trình duyệt...', 'open-external-loading');
+        const course = appState.courses.find(c => c.id === courseId);
+        if (!course) {
+            console.error('Course not found:', courseId);
+            return;
+        }
+        const courseUrl = `${appState.baseUrl}/course/view.php?id=${courseId}`;
+        console.log('Opening course URL:', courseUrl);
+        window.electronAPI.openExternal(courseUrl);
+    } finally {
+        // Give a brief delay to avoid flicker
+        setTimeout(() => hideLoading('open-external-loading'), 500);
+    }
+}
+
+function openCourseInApp(courseId) {
+    try {
+        showLoading('Đang mở trong app...', 'open-external-loading');
+        const courseUrl = `${appState.baseUrl}/course/view.php?id=${courseId}`;
+        window.electronAPI.openCourseInApp(courseUrl);
+    } finally {
+        setTimeout(() => hideLoading('open-external-loading'), 500);
+    }
+}
+
+async function loadCourseDetailsContent(courseId) {
+    try {
+        console.log('Loading course details content for course:', courseId);
+        
+        // Load course details, teachers, announcements, and contents in parallel (like @upgrade/)
+        console.log('Loading course data with token:', appState.currentToken, 'courseId:', courseId);
+        
+        let attempts = 0;
+        let courseDetails, teachers, announcements, contents;
+        while (attempts < 3) {
+            attempts++;
+            [courseDetails, teachers, announcements, contents] = await Promise.all([
+            callAPI('getCourseDetails', appState.currentToken, courseId).catch(err => {
+                console.error('Error loading course details:', err);
+                return {};
+            }),
+            callAPI('getCourseTeachers', appState.currentToken, courseId).catch(err => {
+                console.error('Error loading course teachers:', err);
+                return [];
+            }),
+            callAPI('getCourseAnnouncements', appState.currentToken, courseId).catch(err => {
+                console.error('Error loading course announcements:', err);
+                return [];
+            }),
+            callAPI('getCourseContents', appState.currentToken, courseId).catch(err => {
+                console.error('Error loading course contents:', err);
+                return [];
+            })
+            ]);
+            const empty = (!contents || contents.length === 0) && (!announcements || announcements.length === 0) && (!courseDetails || Object.keys(courseDetails).length === 0);
+            if (!empty) break;
+            console.warn(`Course content empty, retrying (${attempts}/3)...`);
+        }
+        
+        console.log('Course data loaded:', {
+            details: courseDetails,
+            teachers: teachers.length,
+            announcements: announcements.length,
+            contents: contents.length
+        });
+        
+        // Update course instructor info (guard missing DOM)
+        if (teachers.length > 0 && elements.courseInstructor) {
+            const instructorNames = teachers.map(t => t.fullname).join(', ');
+            const span = elements.courseInstructor.querySelector('span');
+            if (span) span.textContent = instructorNames;
+            console.log('Updated instructor info:', instructorNames);
+        } else {
+            console.log('No teachers found or instructor element missing');
+        }
+        
+        // Get assignments for this course (ensure we load them fresh for this course)
+        let courseAssignments = [];
+        try {
+            courseAssignments = await loadAssignmentsForCourse(courseId);
+        } catch (e) {
+            console.warn('Failed to load assignments for course details, falling back to cached list:', e.message);
+            courseAssignments = appState.assignments.filter(a => (a.course === courseId) || (a.courseid === courseId));
+        }
+        
+        // Organize content by type
+        const contentByType = {
+            assignments: courseAssignments,
+            announcements: announcements,
+            resources: [],
+            links: [],
+            pages: []
+        };
+        
+        contents.forEach(section => {
+            (section.modules || []).forEach(module => {
+                const contentItem = {
+                    id: module.id,
+                    name: module.name || 'Untitled',
+                    description: module.description || '',
+                    url: module.url || '#',
+                    added: module.added || Date.now() / 1000,
+                    modified: module.modified || Date.now() / 1000,
+                    visible: module.visible !== 0,
+                    sectionName: section.name || 'General',
+                    contents: module.contents || []
+                };
+                
+                if (contentItem.visible) {
+                    switch (module.modname) {
+                        case 'forum':
+                            contentByType.announcements.push(contentItem);
+                            break;
+                        case 'resource':
+                            contentByType.resources.push(contentItem);
+                            break;
+                        case 'url':
+                            contentByType.links.push(contentItem);
+                            break;
+                        case 'page':
+                            contentByType.pages.push(contentItem);
+                            break;
+                        case 'h5pactivity':
+                        case 'hvp':
+                            // Treat H5P items as links; renderer will display a playable embed if possible
+                            contentByType.links.push({
+                                ...contentItem,
+                                type: 'h5p'
+                            });
+                            break;
+                    }
+                }
+            });
+        });
+        
+    // Render content with course details for summary/links
+    renderCourseDetailsContent(contentByType, courseDetails);
+        
+    } catch (error) {
+        console.error('Error loading course content:', error);
+        elements.courseDetailsContent.innerHTML = `
+            <div class="error-message">
+                <i class="fas fa-exclamation-triangle"></i>
+                <p>Lỗi tải nội dung môn học: ${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+function renderCourseDetailsContent(contentByType, courseDetails = {}) {
+    const { assignments, announcements, resources, links, pages } = contentByType;
+    
+    elements.courseDetailsContent.innerHTML = `
+        <div class="course-details-content">
+            <!-- Unified Header Card -->
+            <div class="course-header-card">
+                <div class="course-header-content">
+                    <div class="course-icon">
+                        <i class="fas fa-graduation-cap"></i>
+                    </div>
+                    <div class="course-header-info">
+                        <h3 class="course-name">${currentCourseDetails.fullname}</h3>
+                        <div class="course-meta-line">
+                            <span class="meta-chip"><i class="fas fa-hashtag"></i> ${currentCourseDetails.shortname}</span>
+                            ${courseDetails.instructor || (courseDetails.contacts && courseDetails.contacts[0]?.fullname) ? `
+                                <span class="meta-chip"><i class="fas fa-user-tie"></i> ${courseDetails.instructor || courseDetails.contacts[0].fullname}</span>
+                            ` : ''}
+                            ${courseDetails.categoryname ? `
+                                <span class="meta-chip"><i class="fas fa-calendar-alt"></i> ${courseDetails.categoryname}</span>
+                            ` : ''}
+                        </div>
+                        ${courseDetails.summary ? `
+                            <p class="course-description">${courseDetails.summary.replace(/<[^>]*>/g, '').substring(0, 150)}${courseDetails.summary.length > 150 ? '...' : ''}</p>
+                        ` : ''}
+                    </div>
+                    <div class="course-header-actions">
+                        ${courseDetails.viewurl ? `
+                            <button class="btn btn-primary course-action-btn" onclick="openCourseInBrowser(${currentCourseDetails.id})">
+                                <i class="fas fa-external-link-alt"></i>
+                                Mở web
+                            </button>
+                            <button class="btn btn-outline course-action-btn" onclick="openCourseInApp(${currentCourseDetails.id})">
+                                Mở trong app
+                            </button>
+                            <button class="btn btn-outline course-action-btn" onclick="refreshCourseDetails()">
+                                <i class="fas fa-sync-alt"></i>
+                                Tải lại
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Course Stats Grid -->
+            <div class="course-stats-grid">
+                <div class="stat-card" onclick="scrollToCourseSection('cd-assignments-section')" style="cursor:pointer">
+                    <div class="stat-icon">
+                        <i class="fas fa-tasks"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-number">${assignments.length}</div>
+                        <div class="stat-label">Bài tập</div>
+                    </div>
+                </div>
+                <div class="stat-card" onclick="scrollToCourseSection('cd-announcements-section')" style="cursor:pointer">
+                    <div class="stat-icon">
+                        <i class="fas fa-bullhorn"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-number">${announcements.length}</div>
+                        <div class="stat-label">Thông báo</div>
+                    </div>
+                </div>
+                <div class="stat-card" onclick="scrollToCourseSection('cd-resources-section')" style="cursor:pointer">
+                    <div class="stat-icon">
+                        <i class="fas fa-file-alt"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-number">${resources.length}</div>
+                        <div class="stat-label">Tài liệu</div>
+                    </div>
+                </div>
+                <div class="stat-card" onclick="scrollToCourseSection('cd-links-section')" style="cursor:pointer">
+                    <div class="stat-icon">
+                        <i class="fas fa-link"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-number">${links.length + pages.length}</div>
+                        <div class="stat-label">Liên kết</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Course Notes Section (moved under stats) -->
+            <div class="details-section">
+                <h4><i class="fas fa-sticky-note"></i> Ghi chú môn học</h4>
+                <textarea id="course-notes-textarea" placeholder="Thêm ghi chú cho môn học này..." onchange="saveCourseNotes(${currentCourseDetails.id}, this.value)"></textarea>
+                <div class="notes-status" id="course-notes-status"></div>
+                <div class="notes-actions-row notes-actions-equal">
+                    <button class="btn btn-outline btn-small btn-note-action" id="btn-open-course-word" onclick="ensureCourseNoteDoc(${currentCourseDetails.id}, '${(currentCourseDetails.fullname||'').replace(/['"\\]/g,'') || 'Mon'}')">
+                        <i class="fas fa-file-word"></i> Mở ghi chú Word
+                    </button>
+                    <button class="btn btn-danger btn-small btn-note-action" id="btn-del-course-word" onclick="deleteCourseNoteDoc(${currentCourseDetails.id})">
+                        <i class="fas fa-trash"></i> Xóa ghi chú Word
+                    </button>
+                    <span id="course-word-indicator" class="file-badge" title="Trạng thái file ghi chú"></span>
+                </div>
+            </div>
+
+            <!-- Collapsible Sections (default collapsed) -->
+            <div id="cd-assignments-section" class="details-section collapsible">
+                <div class="collapsible-header"><h4><i class="fas fa-tasks"></i> Bài tập (${assignments.length})</h4><i class="fas fa-chevron-down"></i></div>
+                <div class="collapsible-body">
+                ${assignments.length > 0 ? `
+                    <div class="content-list">
+                        ${assignments.map(assignment => `
+                            <div class="content-item">
+                                <div class="content-item-header">
+                                    <span class="content-type-badge assignment">Bài tập</span>
+                                    <span class="content-date">${formatDate(assignment.duedate)}</span>
+                                </div>
+                                <h5 class="content-title">${assignment.name}</h5>
+                                <p class="content-description">${assignment.intro || 'Không có mô tả'}</p>
+                                <div class="content-meta">
+                                    <span class="status-badge ${getAssignmentStatus(assignment)}">${getAssignmentStatusText(assignment)}</span>
+                                    <div style="margin-left:auto;display:flex;gap:8px;">
+                                        <button class="btn btn-outline btn-small" onclick="openAssignmentDetails('${assignment.id}')" title="Mở chi tiết trong ứng dụng">
+                                            <i class="fas fa-eye"></i> Chi tiết
+                                        </button>
+                                        <button class="btn btn-outline btn-small" onclick="openAssignment(${assignment.id})" title="Mở trang bài tập">
+                                            <i class="fas fa-external-link-alt"></i> Mở web
+                                        </button>
+                                        <button class="btn btn-primary btn-small" onclick="openSubmission(${assignment.id})" title="Mở trang nộp bài">
+                                            <i class="fas fa-upload"></i> Nộp bài
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '<p class="no-content">Không có bài tập nào</p>'}
+                </div>
+            </div>
+
+            <div id="cd-announcements-section" class="details-section collapsible">
+                <div class="collapsible-header"><h4><i class="fas fa-bullhorn"></i> Thông báo (${announcements.length})</h4><i class="fas fa-chevron-down"></i></div>
+                <div class="collapsible-body">
+                ${announcements.length > 0 ? `
+                    <div class="content-list">
+                        ${announcements.map(announcement => `
+                            <div class="content-item">
+                                <div class="content-item-header">
+                                    <span class="content-type-badge announcement">Thông báo</span>
+                                    <span class="content-date">${formatDate(announcement.timemodified)}</span>
+                                </div>
+                                <h5 class="content-title">
+                                    <a href="${announcement.url}" target="_blank" rel="noopener">${announcement.name}</a>
+                                </h5>
+                                <div class="content-meta">
+                                    <span class="author">${announcement.userfullname || 'Không rõ tác giả'}</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '<p class="no-content">Không có thông báo nào</p>'}
+                </div>
+            </div>
+
+            <div id="cd-resources-section" class="details-section collapsible">
+                <div class="collapsible-header"><h4><i class="fas fa-file-alt"></i> Tài liệu (${resources.length})</h4><i class="fas fa-chevron-down"></i></div>
+                <div class="collapsible-body">
+                ${resources.length > 0 ? `
+                    <div class="content-list">
+                        ${resources.map(resource => `
+                            <div class="content-item">
+                                <div class="content-item-header">
+                                    <span class="content-type-badge resource">Tài liệu</span>
+                                    <span class="content-date">${formatDate(resource.added)}</span>
+                                </div>
+                                <h5 class="content-title">
+                                    ${resource.url ? `<a href="${ensureUrlWithToken(resource.url)}" target="_blank" rel="noopener">${resource.name}</a>` : resource.name}
+                                </h5>
+                                <p class="content-description">${resource.description || 'Không có mô tả'}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '<p class="no-content">Không có tài liệu nào</p>'}
+                </div>
+            </div>
+
+            <div id="cd-links-section" class="details-section collapsible">
+                <div class="collapsible-header"><h4><i class="fas fa-link"></i> Liên kết (${links.length})</h4><i class="fas fa-chevron-down"></i></div>
+                <div class="collapsible-body">
+                ${links.length > 0 ? `
+                    <div class="content-list">
+                        ${links.map(item => `
+                            <div class="content-item">
+                                <div class="content-item-header">
+                                    <span class="content-type-badge link">Liên kết</span>
+                                    <span class="content-date">${formatDate(item.modified)}</span>
+                                </div>
+                                <h5 class="content-title">${item.name}</h5>
+                                <p class="content-description">${item.description || 'Không có mô tả'}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '<p class="no-content">Không có liên kết nào</p>'}
+                </div>
+            </div>
+
+            <div id="cd-weekly-section" class="details-section collapsible">
+                <div class="collapsible-header"><h4><i class="fas fa-calendar-week"></i> Nội dung theo tuần/phần</h4><i class="fas fa-chevron-down"></i></div>
+                <div class="collapsible-body">
+                ${(() => {
+                    const buckets = new Map();
+                    const add = (arr, type) => {
+                        arr.forEach(it => {
+                            const key = it.sectionName || 'Chung';
+                            if (!buckets.has(key)) buckets.set(key, []);
+                            buckets.get(key).push({ ...it, _type: type });
+                        });
+                    };
+                    add(resources, 'resource');
+                    add(links.filter(l => l.type !== 'h5p'), 'link');
+                    add(pages, 'page');
+                    if (buckets.size === 0) return '<p class="no-content">Chưa có nội dung</p>';
+                    const parts = [];
+                    for (const [sec, items] of buckets.entries()) {
+                        parts.push(`
+                            <div class="content-section">
+                                <h5>${sec}</h5>
+                                <div class="content-list">
+                                    ${items.map(it => {
+                                        const link = it.url ? `<a href="${ensureUrlWithToken(it.url)}" target="_blank" rel="noopener">${it.name}</a>` : it.name;
+                                        return `
+                                            <div class="content-item">
+                                                <div class="content-item-header">
+                                                    <span class="content-type-badge ${it._type}">${it._type}</span>
+                                                    <span class="content-date">${formatDate(it.modified)}</span>
+                                                </div>
+                                                <h5 class="content-title">${link}</h5>
+                                            </div>`;
+                                    }).join('')}
+                                </div>
+                            </div>`);
+                    }
+                    return parts.join('');
+                })()}
+                </div>
+            </div>
+
+            <div id="cd-pages-section" class="details-section collapsible">
+                <div class="collapsible-header"><h4><i class="fas fa-file-text"></i> Trang (${pages.length})</h4><i class="fas fa-chevron-down"></i></div>
+                <div class="collapsible-body">
+                ${pages.length > 0 ? `
+                    <div class="content-list">
+                        ${pages.map(item => `
+                            <div class="content-item">
+                                <div class="content-item-header">
+                                    <span class="content-type-badge page">Trang</span>
+                                    <span class="content-date">${formatDate(item.modified)}</span>
+                                </div>
+                                <h5 class="content-title">${item.name}</h5>
+                                <p class="content-description">${item.description || 'Không có mô tả'}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '<p class="no-content">Không có trang nào</p>'}
+                </div>
+            </div>
+        </div>
+    `;
+    // After render, load existing course notes
+    loadCourseNotes(currentCourseDetails.id).catch(() => {});
+    // Update Word note indicator & delete button state
+    (async () => {
+        try {
+            const settings = await window.electronAPI.getSettings();
+            const path = settings?.[`courseNoteDoc_${currentCourseDetails.id}`];
+            const ind = document.getElementById('course-word-indicator');
+            const del = document.getElementById('btn-del-course-word');
+            if (path) {
+                if (ind) ind.textContent = 'Đã có file';
+                if (ind) ind.classList.add('success');
+                if (del) del.disabled = false;
+            } else {
+                if (ind) ind.textContent = 'Chưa có file';
+                if (ind) ind.classList.remove('success');
+                if (del) del.disabled = true;
+            }
+        } catch {}
+    })();
+
+    // Initialize collapsible sections and stat card scroll
+    try { initCourseDetailCollapsibles(); } catch (e) { console.warn('init collapsibles failed', e); }
+}
+
+function closeCourseDetails() {
+    elements.courseDetailsModal.classList.add('hidden');
+    currentCourseDetails = null;
+    appState.currentCourse = null;
+    
+}
+
+function refreshCourseDetails() {
+    if (currentCourseDetails) {
+        loadCourseDetailsContent(currentCourseDetails.id);
+    }
+}
+
+// Collapsible helpers and stat scroll
+function toggleCourseSection(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // Ensure body exists and is display:block to allow transition
+    const body = el.querySelector('.collapsible-body');
+    if (el.classList.contains('open')) {
+        el.classList.remove('open');
+    } else {
+        if (body) body.style.display = 'block';
+        el.classList.add('open');
+        // cleanup inline after transition
+        setTimeout(() => { if (body) body.style.removeProperty('display'); }, 350);
+    }
+}
+
+function scrollToCourseSection(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // collapse others first to keep page compact
+    document.querySelectorAll('.details-section.collapsible').forEach(sec => {
+        if (sec.id !== id) sec.classList.remove('open');
+    });
+    el.classList.add('open');
+    const header = el.querySelector('.collapsible-header') || el;
+    const body = el.querySelector('.collapsible-body');
+    if (body) body.style.display = 'block';
+    const y = header.getBoundingClientRect().top + window.scrollY - 80; // keep title visible
+    window.scrollTo({ top: y, behavior: 'smooth' });
+    // clean inline style after a short delay to let CSS take over
+    setTimeout(() => { if (body) body.style.removeProperty('display'); }, 400);
+}
+
+// Expose for inline handlers
+window.toggleCourseSection = toggleCourseSection;
+window.scrollToCourseSection = scrollToCourseSection;
+
+function initCourseDetailCollapsibles() {
+    const root = elements.courseDetailsContent.querySelector('.course-details-content');
+    if (!root) return;
+    // Map headings to stable IDs
+    const map = [
+        { key: 'Bài tập', id: 'cd-assignments-section' },
+        { key: 'Thông báo', id: 'cd-announcements-section' },
+        { key: 'Tài liệu', id: 'cd-resources-section' },
+        { key: 'Liên kết', id: 'cd-links-section' },
+        { key: 'Nội dung theo tuần/phần', id: 'cd-weekly-section' },
+        { key: 'Trang', id: 'cd-pages-section' }
+    ];
+    const sections = Array.from(root.querySelectorAll('.details-section'));
+    sections.forEach(sec => {
+        const h = sec.querySelector('h4');
+        if (!h) return;
+        const label = h.textContent || '';
+        const hit = map.find(m => label.includes(m.key));
+        if (!hit) return;
+        sec.id = hit.id;
+        // If Prebuilt with collapsible markup, only bind header
+        if (sec.classList.contains('collapsible')) {
+            const header = sec.querySelector('.collapsible-header');
+            if (header && !header.__bound) {
+                header.__bound = true;
+                header.addEventListener('click', () => toggleCourseSection(hit.id));
+            }
+            return;
+        }
+        // Legacy: convert
+        sec.classList.add('collapsible');
+        const chevron = document.createElement('i');
+        chevron.className = 'fas fa-chevron-down';
+        const header = document.createElement('div');
+        header.className = 'collapsible-header';
+        header.appendChild(h.cloneNode(true));
+        header.appendChild(chevron);
+        const body = document.createElement('div');
+        body.className = 'collapsible-body';
+        const toMove = [];
+        Array.from(sec.childNodes).forEach(n => { if (n !== h) toMove.push(n); });
+        toMove.forEach(n => body.appendChild(n));
+        sec.innerHTML = '';
+        sec.appendChild(header);
+        sec.appendChild(body);
+        header.addEventListener('click', () => toggleCourseSection(hit.id));
+    });
+    // Generic safety binding for all collapsible headers
+    root.querySelectorAll('.details-section.collapsible .collapsible-header').forEach(header => {
+        if (header.__bound) return; header.__bound = true;
+        const parent = header.closest('.details-section.collapsible');
+        if (!parent.id) return;
+        header.addEventListener('click', () => toggleCourseSection(parent.id));
+    });
+    // Stats card programmatic binding fallback
+    const grid = root.querySelector('.course-stats-grid');
+    if (grid) {
+        const cards = grid.querySelectorAll('.stat-card');
+        const ids = ['cd-assignments-section','cd-announcements-section','cd-resources-section','cd-links-section'];
+        cards.forEach((card, idx) => {
+            card.style.cursor = 'pointer';
+            card.addEventListener('click', () => scrollToCourseSection(ids[idx]));
+        });
+    }
+}
+
+// Search and filter functions
+function performGlobalSearch() {
+    if (!appState.searchQuery) {
+        // Clear search - show all content
+        updateCoursesList();
+        return;
+    }
+    
+    const query = appState.searchQuery.toLowerCase();
+    const filteredCourses = appState.courses.filter(course => {
+        return course.fullname.toLowerCase().includes(query) ||
+               course.shortname.toLowerCase().includes(query) ||
+               (course.instructor && course.instructor.toLowerCase().includes(query));
+    });
+    
+    // Update course lists with filtered results
+    updateCoursesListWithFilter(filteredCourses);
+}
+
+function updateCoursesListWithFilter(filteredCourses) {
+    if (!filteredCourses || filteredCourses.length === 0) {
+        elements.generalCoursesList.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-search"></i>
+                <p>Không tìm thấy khóa học nào</p>
+            </div>
+        `;
+        elements.semesterCoursesList.innerHTML = '';
+        return;
+    }
+
+    // Separate general and semester courses
+    const generalCourses = filteredCourses.filter(course => {
+        const semester = appState.courseSemMap.get(course.id) ? 
+            getCategory(appState.courseSemMap.get(course.id)) : null;
+        return !semester;
+    });
+    
+    const semesterCourses = filteredCourses.filter(course => {
+        const semester = appState.courseSemMap.get(course.id) ? 
+            getCategory(appState.courseSemMap.get(course.id)) : null;
+        return semester;
+    });
+
+    // Update counts
+    elements.generalCount.textContent = generalCourses.length;
+    elements.semesterCount.textContent = semesterCourses.length;
+
+    // Render filtered courses
+    if (generalCourses.length > 0) {
+        elements.generalCoursesList.innerHTML = generalCourses.map(course => 
+            createCourseCard(course)
+        ).join('');
+    } else {
+        elements.generalCoursesList.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-globe"></i>
+                <p>Không có khóa học chung nào</p>
+            </div>
+        `;
+    }
+
+    if (semesterCourses.length > 0) {
+        elements.semesterCoursesList.innerHTML = semesterCourses.map(course => 
+            createCourseCard(course)
+        ).join('');
+    } else {
+        elements.semesterCoursesList.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-calendar-alt"></i>
+                <p>Không có khóa học theo kỳ nào</p>
+            </div>
+        `;
+    }
+}
+
+function filterCoursesBySemester() {
+    const selectedSemester = elements.semesterFilterCourses.value;
+    
+    if (!selectedSemester) {
+        // Show all courses
+        updateCoursesList();
+        return;
+    }
+    
+    const filteredCourses = appState.courses.filter(course => {
+        const semester = appState.courseSemMap.get(course.id) ? 
+            getCategory(appState.courseSemMap.get(course.id)) : null;
+        return semester && semester.id.toString() === selectedSemester;
+    });
+    
+    updateCoursesListWithFilter(filteredCourses);
+}
+
+// App initialization
+async function init() {
+    // Setup event listeners
+    setupEventListeners();
+    await applyThemeFromSettings();
+    await loadStcAuthStateIntoForms();
+    
+    // Initialize sidebar
+    updateSidebarUserInfo();
+    if (elements.stcProfileName) elements.stcProfileName.textContent = appState.currentUser?.fullname || '-';
+    if (elements.stcProfileStudentId) elements.stcProfileStudentId.textContent = appState.currentStudentId || '-';
+    
+    // Initialize smart notifications
+    await smartNotifications.init();
+
+    try {
+        if (appState.stc.sid) {
+            await stcFetchAll({ force: false });
+            await fetchAndCacheStcProfile({ force: false });
+            hydrateStcDerivedData();
+            renderGrades();
+            renderScheduleUpdates();
+        }
+    } catch {}
+
+    try {
+        updateSmartDashboard();
+    } catch {}
+
+    try {
+        const settings = await window.electronAPI.getSettings();
+        const enabled = Boolean(settings?.stcAutoRefreshEnabled);
+        const minutes = Number(settings?.stcAutoRefreshMinutes) || 15;
+        if (elements.stcAutoRefreshEnabled) elements.stcAutoRefreshEnabled.checked = enabled;
+        if (elements.stcAutoRefreshMinutes) elements.stcAutoRefreshMinutes.value = minutes;
+
+        const apply = async () => {
+            const en = Boolean(elements.stcAutoRefreshEnabled?.checked);
+            const mins = Math.max(5, Math.min(180, Number(elements.stcAutoRefreshMinutes?.value) || 15));
+            await window.electronAPI.setSetting('stcAutoRefreshEnabled', en);
+            await window.electronAPI.setSetting('stcAutoRefreshMinutes', mins);
+        };
+        if (elements.stcAutoRefreshEnabled) elements.stcAutoRefreshEnabled.addEventListener('change', apply);
+        if (elements.stcAutoRefreshMinutes) elements.stcAutoRefreshMinutes.addEventListener('change', apply);
+    } catch {}
+
+    try {
+        if (window.__stcAutoRefreshInterval) clearInterval(window.__stcAutoRefreshInterval);
+        window.__stcAutoRefreshInterval = setInterval(async () => {
+            try {
+                const settings = await window.electronAPI.getSettings();
+                if (!shouldStcRefreshNow(settings)) return;
+                if (!appState.stc.sid) return;
+                await stcFetchAll({ force: true });
+                await window.electronAPI.setSetting('stcLastRefreshAt', Date.now());
+                hydrateStcDerivedData();
+                renderGrades();
+                renderScheduleUpdates();
+                updateSmartDashboard();
+            } catch {}
+        }, 60 * 1000);
+    } catch {}
+    
+    // Load saved accounts
+    await loadSavedAccounts();
+    
+    // Try auto login
+    try {
+        const lastLoginStudentId = await window.electronAPI.getLastLoginAccount();
+        if (lastLoginStudentId) {
+            // Keep loading screen visible during auto login
+            // Don't hide it yet - we'll hide it after login completes
+            
+            // Auto login
+            const result = await window.electronAPI.loginWithStudentId(lastLoginStudentId);
+            
+            if (result.success) {
+                appState.currentUser = result.userInfo;
+                appState.currentToken = result.token;
+                appState.currentStudentId = lastLoginStudentId;
+                
+                // Initialize app (this will load data)
+                await initializeApp();
+                
+                // Hide loading screen after everything is loaded
+                elements.loadingScreen.classList.add('hidden');
+                return; // Skip showing login screen
+            } else {
+                // If auto login fails, show login screen
+                console.warn('Auto login failed:', result.error);
+                // Hide loading screen and show login screen
+                setTimeout(() => {
+                    elements.loadingScreen.classList.add('hidden');
+                    elements.loginScreen.classList.remove('hidden');
+                }, 500);
+                return;
+            }
+        }
+    } catch (error) {
+        console.error('Auto login error:', error);
+        // On error, show login screen
+        setTimeout(() => {
+            elements.loadingScreen.classList.add('hidden');
+            elements.loginScreen.classList.remove('hidden');
+        }, 500);
+        return;
+    }
+    
+    // No auto login - hide loading screen and show login screen
+    setTimeout(() => {
+        elements.loadingScreen.classList.add('hidden');
+        elements.loginScreen.classList.remove('hidden');
+    }, 2000);
+    
+    // Listen for saved accounts from main process
+    window.electronAPI.onHasSavedAccounts((event, accounts) => {
+        if (accounts.length > 0) {
+            showNotification(`Tìm thấy ${accounts.length} tài khoản đã lưu`, 'info');
+        }
+    });
+}
+
+// Start the app
+document.addEventListener('DOMContentLoaded', init);
+
+// Update app version in settings if element exists
+(async function updateAppVersionLabel(){
+  try {
+    const el = document.getElementById('app-version');
+    if (!el || !window?.electronAPI?.getAppVersion) return;
+    const ver = await window.electronAPI.getAppVersion();
+    el.textContent = ver || '-';
+  } catch (e) {}
+})();
+
+// Bind TLS checkbox on login screen
+(function bindLoginTLS(){
+  const cb = document.getElementById('login-allow-insecure-tls');
+  if (!cb || !window?.electronAPI) return;
+  (async () => {
+    try {
+      const settings = await window.electronAPI.getSettings();
+      cb.checked = Boolean(settings?.allowInsecureTLS);
+    } catch {}
+  })();
+  cb.addEventListener('change', async (e) => {
+    try {
+      await window.electronAPI.setSetting('allowInsecureTLS', e.target.checked);
+      showNotification('TLS setting saved. You can try login again.', 'info');
+    } catch {}
+  });
+})();
+
+// Debug helper to seed deadline samples for verifying calendar colors
+// Usage in DevTools: window.__seedCalendarTestData()
+window.__seedCalendarTestData = function() {
+    try {
+        const now = new Date();
+        const toUnix = (d) => Math.floor(d.getTime() / 1000);
+        const mk = (name, daysFromNow, submitted=false) => {
+            const due = new Date(now);
+            due.setDate(due.getDate() + daysFromNow);
+            return { id: Math.floor(Math.random()*1e9), name, duedate: toUnix(due), status: submitted ? 'submitted' : 'draft', isSubmitted: submitted, isGroup: false, course: (appState.courses[0]?.id || 0) };
+        };
+        const samples = [
+            mk('Test Urgent (<=24h)', 0, false),
+            mk('Test Near (3d)', 3, false),
+            mk('Test Far (10d)', 10, false),
+            mk('Submitted (5d)', 5, true)
+        ];
+        appState.assignments = [...appState.assignments.filter(a => a.__seed !== true), ...samples.map(a => ({...a, __seed:true}))];
+        updateMonthCalendar();
+        updateSmartDashboard();
+        console.log('Seeded calendar test data');
+    } catch (e) { console.warn('Seed test data error', e); }
+};
+
+// Header course actions handlers
+// global header actions removed per design update
+
+// Assignment details loading overlay helpers
+function showAssignmentLoading() {
+  let overlay = document.getElementById('assignment-loading');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'assignment-loading';
+    overlay.className = 'assignment-loading-overlay';
+    overlay.innerHTML = '<div class="assignment-loading-box"><i class="fas fa-spinner fa-spin"></i><span>Đang tải chi tiết bài tập...</span></div>';
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display = 'flex';
+}
+function hideAssignmentLoading() {
+  const overlay = document.getElementById('assignment-loading');
+  if (overlay) overlay.style.display = 'none';
+}
+
+// Wrap openAssignment to show loading
+const __openAssignmentOriginal = typeof openAssignment === 'function' ? openAssignment : null;
+window.openAssignment = async function(assignId) {
+  try {
+    showAssignmentLoading();
+    if (__openAssignmentOriginal) {
+      await __openAssignmentOriginal(assignId);
+    } else {
+      // fallback to existing implementation call if defined later
+      if (typeof window.__openAssignmentImpl === 'function') {
+        await window.__openAssignmentImpl(assignId);
+      }
+    }
+  } catch (e) {
+    console.error('openAssignment error', e);
+  } finally {
+    hideAssignmentLoading();
+  }
+};
+
+// Generic page loading overlay
+function showLoading(message = 'Đang tải...', overlayId = 'page-loading') {
+  let overlay = document.getElementById(overlayId);
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = overlayId;
+    overlay.className = 'assignment-loading-overlay';
+    overlay.innerHTML = `<div class="assignment-loading-box"><i class="fas fa-spinner fa-spin"></i><span id="${overlayId}-text"></span></div>`;
+    document.body.appendChild(overlay);
+  }
+  const textEl = document.getElementById(`${overlayId}-text`);
+  if (textEl) textEl.textContent = message;
+  overlay.style.display = 'flex';
+}
+function hideLoading(overlayId = 'page-loading') {
+  const overlay = document.getElementById(overlayId);
+  if (overlay) overlay.style.display = 'none';
+}
+
+// Wrap openAssignmentDetails to show loading
+const __openAssignmentDetailsOriginal = openAssignmentDetails;
+openAssignmentDetails = async function(assignmentId){
+  try {
+    showLoading('Đang tải chi tiết bài tập...');
+    return await __openAssignmentDetailsOriginal(assignmentId);
+  } finally {
+    hideLoading();
+  }
+};
+
+// Wrap external openAssignment (open in browser) with loading
+const __openAssignmentExternalOriginal = openAssignment;
+openAssignment = async function(assignmentId){
+  try {
+    showLoading('Đang mở trên trình duyệt...', 'open-external-loading');
+    return await __openAssignmentExternalOriginal(assignmentId);
+  } finally {
+    setTimeout(() => hideLoading('open-external-loading'), 500);
+  }
+};
+
+// Ensure Moodle file URLs include token param when required
+function ensureUrlWithToken(url) {
+  try {
+    if (!url) return url;
+    if (!appState || !appState.currentToken) return url;
+    if (typeof url !== 'string') url = String(url);
+    if (url.includes('token=')) return url;
+    const hasQuery = url.includes('?');
+    return `${url}${hasQuery ? '&' : '?'}token=${encodeURIComponent(appState.currentToken)}`;
+  } catch (e) {
+    console.warn('ensureUrlWithToken error:', e?.message || e);
+    return url;
+  }
+}
+
+// ===== TOOLS SECTION LOGIC =====
+
+// Survey automation state
+let surveyState = {
+    isRunning: false,
+    isPaused: false,
+    currentProcess: null
+};
+
+// Survey tool elements
+const surveyElements = {
+    email: document.getElementById('survey-email'),
+    password: document.getElementById('survey-password'),
+    startBtn: document.getElementById('start-survey-btn'),
+    pauseBtn: document.getElementById('pause-survey-btn'),
+    stopBtn: document.getElementById('stop-survey-btn'),
+    statusText: document.getElementById('survey-status-text'),
+    logContent: document.getElementById('survey-log-content')
+};
+
+// Survey log management
+function addSurveyLog(message, type = 'info') {
+    if (!surveyElements.logContent) return;
+    
+    const timestamp = new Date().toLocaleTimeString('vi-VN');
+    const logEntry = document.createElement('p');
+    logEntry.className = `log-entry ${type}`;
+    logEntry.textContent = `[${timestamp}] ${message}`;
+    
+    surveyElements.logContent.appendChild(logEntry);
+    surveyElements.logContent.scrollTop = surveyElements.logContent.scrollHeight;
+}
+
+// Update survey status
+function updateSurveyStatus(status, type = 'info') {
+    if (!surveyElements.statusText) return;
+    
+    surveyElements.statusText.textContent = status;
+    
+    const statusIndicator = document.querySelector('.status-indicator');
+    if (statusIndicator) {
+        statusIndicator.style.borderLeftColor = type === 'success' ? 'var(--success)' : 
+                                               type === 'warning' ? 'var(--warning)' : 
+                                               type === 'error' ? 'var(--error)' : 'var(--info)';
+    }
+}
+
+// Start survey automation
+async function startSurvey() {
+    const email = surveyElements.email?.value.trim();
+    const password = surveyElements.password?.value.trim();
+    
+    if (!email || !password) {
+        showNotification('Vui lòng nhập đầy đủ MSSV và mật khẩu', 'error');
+        return;
+    }
+    
+    try {
+        surveyState.isRunning = true;
+        surveyState.isPaused = false;
+        
+        // Update UI
+        surveyElements.startBtn?.classList.add('hidden');
+        surveyElements.pauseBtn?.classList.remove('hidden');
+        surveyElements.stopBtn?.classList.remove('hidden');
+        
+        updateSurveyStatus('Đang khởi tạo...', 'info');
+        addSurveyLog('🚀 Bắt đầu khảo sát tự động...', 'info');
+        
+        // Call main process to start survey
+        const result = await window.electronAPI.startSurvey({
+            email: email,
+            password: password
+        });
+        
+        if (result.success) {
+            updateSurveyStatus('Đang thực hiện khảo sát...', 'info');
+            addSurveyLog('✅ Khởi tạo thành công, đang xử lý khảo sát...', 'success');
+        } else {
+            throw new Error(result.error || 'Không thể khởi tạo khảo sát');
+        }
+        
+    } catch (error) {
+        console.error('Survey start error:', error);
+        addSurveyLog(`❌ Lỗi: ${error.message}`, 'error');
+        updateSurveyStatus('Lỗi khởi tạo', 'error');
+        
+        // Reset UI
+        surveyState.isRunning = false;
+        surveyElements.startBtn?.classList.remove('hidden');
+        surveyElements.pauseBtn?.classList.add('hidden');
+        surveyElements.stopBtn?.classList.add('hidden');
+    }
+}
+
+// Pause/Resume survey
+function toggleSurveyPause() {
+    if (!surveyState.isRunning) return;
+    
+    surveyState.isPaused = !surveyState.isPaused;
+    
+    if (surveyState.isPaused) {
+        surveyElements.pauseBtn.innerHTML = '<i class="fas fa-play"></i> Tiếp tục';
+        updateSurveyStatus('Đã tạm dừng', 'warning');
+        addSurveyLog('⏸️ Đã tạm dừng khảo sát', 'warning');
+        
+        // Call main process to pause
+        window.electronAPI.pauseSurvey();
+    } else {
+        surveyElements.pauseBtn.innerHTML = '<i class="fas fa-pause"></i> Tạm dừng';
+        updateSurveyStatus('Đang tiếp tục...', 'info');
+        addSurveyLog('▶️ Tiếp tục khảo sát', 'info');
+        
+        // Call main process to resume
+        window.electronAPI.resumeSurvey();
+    }
+}
+
+// Stop survey
+async function stopSurvey() {
+    if (!surveyState.isRunning) return;
+    
+    try {
+        surveyState.isRunning = false;
+        surveyState.isPaused = false;
+        
+        updateSurveyStatus('Đang dừng...', 'warning');
+        addSurveyLog('🛑 Đang dừng khảo sát...', 'warning');
+        
+        // Call main process to stop
+        await window.electronAPI.stopSurvey();
+        
+        // Reset UI
+        surveyElements.startBtn?.classList.remove('hidden');
+        surveyElements.pauseBtn?.classList.add('hidden');
+        surveyElements.stopBtn?.classList.add('hidden');
+        
+        updateSurveyStatus('Đã dừng', 'info');
+        addSurveyLog('✅ Đã dừng khảo sát', 'info');
+        
+    } catch (error) {
+        console.error('Survey stop error:', error);
+        addSurveyLog(`❌ Lỗi khi dừng: ${error.message}`, 'error');
+    }
+}
+
+// Initialize survey tool
+function initSurveyTool() {
+    // Auto-fill current student ID
+    if (appState && appState.currentStudentId) {
+        surveyElements.email.value = appState.currentStudentId;
+    }
+    
+    // Load saved credentials
+    const savedEmail = localStorage.getItem('survey-email');
+    const savedPassword = localStorage.getItem('survey-password');
+    
+    if (savedEmail) surveyElements.email.value = savedEmail;
+    if (savedPassword) surveyElements.password.value = savedPassword;
+    
+    // Save credentials on change
+    surveyElements.email?.addEventListener('input', () => {
+        localStorage.setItem('survey-email', surveyElements.email.value);
+    });
+    
+    surveyElements.password?.addEventListener('input', () => {
+        localStorage.setItem('survey-password', surveyElements.password.value);
+    });
+    
+    // Button event listeners
+    surveyElements.startBtn?.addEventListener('click', startSurvey);
+    surveyElements.pauseBtn?.addEventListener('click', toggleSurveyPause);
+    surveyElements.stopBtn?.addEventListener('click', stopSurvey);
+    
+    // Enter key support
+    [surveyElements.email, surveyElements.password].forEach(input => {
+        input?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !surveyState.isRunning) {
+                startSurvey();
+            }
+        });
+    });
+}
+
+// Initialize tools when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    initSurveyTool();
+    
+    // Listen for survey events from main process
+    window.electronAPI.onSurveyLog((message) => {
+        addSurveyLog(message);
+    });
+    
+    window.electronAPI.onSurveyStatus((status) => {
+        updateSurveyStatus(status);
+    });
+});
+
+// ===== DKHP SCRIPT GENERATOR =====
+(function initDkhpTool(){
+    const input = document.getElementById('dkhp-input');
+    const output = document.getElementById('dkhp-output');
+    const genBtn = document.getElementById('dkhp-generate-btn');
+    const copyBtn = document.getElementById('dkhp-copy-btn');
+    if (!input || !output || !genBtn || !copyBtn) return;
+
+    function buildScript(rawList){
+        const list = (rawList || '').split(',').map(s => s.trim()).filter(Boolean);
+        const csv = list.join(',');
+        return `var monDangKy = "\n${csv}\n";
+
+var successLog = (message) => console.log('%c' + message, 'font-weight:bold; color:green;');
+var infoLog = (message) => console.log('%c' + message, 'font-weight:bold; color:#0ea5e9;');
+var warnLog = (message) => console.log('%c' + message, 'font-weight:bold; color:#f59e0b;');
+var errorLog = (message) => console.log('%c' + message, 'font-weight:bold; color:red;');
+
+(function(){
+  try {
+    var classCodes = monDangKy.split(',').map(it=>it.trim()).filter(Boolean);
+
+    function waitForElement(selector){
+      return new Promise((resolve) => {
+        if (document.querySelector(selector)) return resolve(document.querySelector(selector));
+        const observer = new MutationObserver(() => {
+          if (document.querySelector(selector)) {
+            resolve(document.querySelector(selector));
+            observer.disconnect();
+          }
+        });
+        observer.observe(document.body, { childList:true, subtree:true });
+      });
+    }
+
+    function findAndCheck(rows){
+      function pickCode(code){
+        for (let row of rows){
+          var checkbox = row.querySelector('input[type="checkbox"]');
+          var codeCell = row.querySelector('td:nth-child(2)');
+          if (!checkbox || !codeCell) continue;
+          var text = (codeCell.textContent||'').trim();
+          if (text === code){
+            if (!checkbox.checked){ checkbox.click(); }
+            successLog('Đã chọn: ' + text);
+            return true;
+          }
+        }
+        warnLog('Không tìm thấy: ' + code);
+        return false;
+      }
+      classCodes.forEach(c => pickCode(c));
+    }
+
+    waitForElement('tbody > tr').then(() => {
+      var table = document.querySelector('tbody');
+      if (!table){ errorLog('Không tìm thấy bảng lớp'); return; }
+      var rows = table.querySelectorAll('tr');
+      if (!rows || !rows.length){ errorLog('Không tìm thấy hàng dữ liệu'); return; }
+      infoLog('Đang tìm và chọn các lớp...');
+      findAndCheck(rows);
+
+      var submitSelectors = [
+        ".detailBar button.chakra-button",
+        "input[type='submit'][value*='Đăng']",
+        "button[type='submit']",
+        ".btn-submit",
+        "#submit-btn"
+      ];
+
+      function clickSubmit(){
+        for (let sel of submitSelectors){
+          var btn = document.querySelector(sel);
+          if (btn){ btn.click(); successLog('Đã gửi đăng ký'); return true; }
+        }
+        warnLog('Không tìm thấy nút đăng ký, tự nhấn tay giúp nhé.');
+        return false;
+      }
+
+      // chờ một nhịp để UI cập nhật trước khi nộp
+      setTimeout(clickSubmit, 300);
+      return 'Done';
+    });
+  } catch (e){
+    errorLog('Lỗi script: ' + (e && e.message));
+  }
+})();`;
+    }
+
+    genBtn.addEventListener('click', () => {
+        const script = buildScript(input.value);
+        output.value = script;
+    });
+
+    copyBtn.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(output.value || '');
+            showNotification('Đã copy script vào clipboard', 'success');
+        } catch {
+            showNotification('Copy thất bại', 'error');
+        }
+    });
+})();
+// ===== END DKHP SCRIPT GENERATOR =====
+
+(function initToolsTabs(){
+    const tabs = document.querySelectorAll('.tools-tab');
+    const panels = document.querySelectorAll('.tools-panel');
+    if (!tabs.length || !panels.length) return;
+
+    function activate(tool){
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.tool === tool));
+        panels.forEach(p => {
+            const show = p.dataset.toolPanel === tool;
+            p.classList.toggle('hidden', !show);
+            if (show) {
+                p.classList.remove('fade-in'); // restart animation
+                void p.offsetWidth; // reflow hack
+                p.classList.add('fade-in');
+            }
+        });
+    }
+
+    tabs.forEach(t => t.addEventListener('click', () => activate(t.dataset.tool)));
+
+    // default active is survey
+    activate('survey');
+})();
+
+(function initDkhpExternal(){
+    const btn = document.getElementById('dkhp-open-web');
+    if (!btn || !window.electronAPI?.openExternal) return;
+    btn.addEventListener('click', async () => {
+        try {
+            await window.electronAPI.openExternal('https://dkhp-uit.vercel.app/1');
+        } catch {
+            showNotification('Không thể mở trình duyệt', 'error');
+        }
+    });
+})();
+
+// Exam Schedule Functions
+function parseExamScheduleExcel(data) {
+    if (!Array.isArray(data) || data.length < 7) {
+        throw new Error('Dữ liệu Excel không hợp lệ');
+    }
+    
+    let headerRowIndex = -1;
+    const headerMap = {
+        'STT': 0, 'Mã MH': 1, 'Tên MH': 2, 'Mã lớp': 3, 'Giảng Viên LT': 4,
+        'Khóa học': 5, 'Khoa QL': 6, 'Ngày thi': 7, 'Thứ': 8, 'Ca Thi': 9,
+        'Phòng Thi': 10, 'Số SV': 11, 'Hệ ĐT': 12, 'Đợt thi': 13, 'Lần thi': 14,
+        'Học kỳ': 15, 'Năm học': 16
+    };
+    
+    for (let i = 0; i < Math.min(15, data.length); i++) {
+        const row = data[i];
+        if (Array.isArray(row) && row.length > 1) {
+            const firstCell = String(row[0] || '').trim();
+            const secondCell = String(row[1] || '').trim();
+            if (firstCell === 'STT' && (secondCell.includes('Mã MH') || secondCell.includes('Mã'))) {
+                headerRowIndex = i;
+                break;
+            }
+        }
+    }
+    
+    if (headerRowIndex === -1) {
+        throw new Error('Không tìm thấy dòng header trong file Excel');
+    }
+    
+    const exams = [];
+    for (let i = headerRowIndex + 1; i < data.length; i++) {
+        const row = data[i];
+        if (!Array.isArray(row) || row.length < 2) continue;
+        
+        const maMH = String(row[1] || '').trim();
+        if (!maMH || maMH === 'Mã MH') continue;
+        
+        const ngayThi = String(row[7] || '').trim();
+        if (!ngayThi) continue;
+        
+        const exam = {
+            stt: String(row[0] || '').trim(),
+            maMH: maMH,
+            tenMH: String(row[2] || '').trim(),
+            maLop: String(row[3] || '').trim(),
+            giangVien: String(row[4] || '').trim(),
+            khoaHoc: String(row[5] || '').trim(),
+            khoaQL: String(row[6] || '').trim(),
+            ngayThi: ngayThi,
+            thu: String(row[8] || '').trim(),
+            caThi: String(row[9] || '').trim(),
+            phongThi: String(row[10] || '').trim(),
+            soSV: String(row[11] || '').trim(),
+            heDT: String(row[12] || '').trim(),
+            dotThi: String(row[13] || '').trim(),
+            lanThi: String(row[14] || '').trim(),
+            hocKy: String(row[15] || '').trim(),
+            namHoc: String(row[16] || '').trim()
+        };
+        
+        exams.push(exam);
+    }
+    
+    return exams;
+}
+
+function extractCourseCodeBase(text) {
+    if (!text) return null;
+    const upper = String(text).trim().toUpperCase();
+    const match = upper.match(/^([A-Z]{2,}\d{2,3})/);
+    return match ? match[1] : null;
+}
+
+function extractClassCode(text) {
+    if (!text) return null;
+    const upper = String(text).trim().toUpperCase();
+    const match = upper.match(/\.([A-Z]\d{2,3})(?:\.|$)/);
+    return match ? match[1] : null;
+}
+
+function extractFullCourseCode(text) {
+    if (!text) return null;
+    const upper = String(text).trim().toUpperCase();
+    const match = upper.match(/^([A-Z]{2,}\d{2,3}\.[A-Z]\d{2,3})/);
+    return match ? match[1] : null;
+}
+
+function getCurrentSemesterCourses() {
+    const currentSemesterId = detectCurrentSemesterId();
+    if (!currentSemesterId) {
+        console.log('No current semester detected, using all courses');
+        return appState.courses;
+    }
+    
+    const currentCourses = appState.courses.filter(course => {
+        const courseSemId = appState.courseSemMap.get(course.id);
+        return courseSemId === currentSemesterId;
+    });
+    
+    console.log(`Current semester courses: ${currentCourses.length} out of ${appState.courses.length} total courses`);
+    return currentCourses;
+}
+
+function filterExamScheduleByCourses(exams, courses) {
+    if (!exams || !courses || courses.length === 0) return [];
+    
+    const courseClassMap = new Map();
+    courses.forEach(course => {
+        const shortname = String(course.shortname || '').trim();
+        const fullname = String(course.fullname || '').trim();
+        
+        const codeBase = extractCourseCodeBase(shortname) || extractCourseCodeBase(fullname);
+        if (!codeBase) return;
+        
+        const classCode = extractClassCode(shortname) || extractClassCode(fullname);
+        if (!classCode) return;
+        
+        if (!courseClassMap.has(codeBase)) {
+            courseClassMap.set(codeBase, new Set());
+        }
+        courseClassMap.get(codeBase).add(classCode);
+    });
+    
+    console.log('Course classes extracted:', Array.from(courseClassMap.entries()).map(([code, classes]) => 
+        `${code}: [${Array.from(classes).join(', ')}]`
+    ));
+    
+    const filtered = exams.filter(exam => {
+        const maMH = String(exam.maMH || '').trim();
+        const maLop = String(exam.maLop || '').trim();
+        if (!maMH || !maLop) return false;
+        
+        const examCodeBase = extractCourseCodeBase(maMH);
+        if (!examCodeBase) return false;
+        
+        const examClassCode = extractClassCode(maLop);
+        if (!examClassCode) return false;
+        
+        const allowedClasses = courseClassMap.get(examCodeBase);
+        if (!allowedClasses) return false;
+        
+        const isMatch = allowedClasses.has(examClassCode);
+        if (isMatch) {
+            console.log(`Matched exam: ${maMH} - ${maLop} (class: ${examClassCode})`);
+        }
+        return isMatch;
+    });
+    
+    return filtered;
+}
+
+function formatExamDate(dateStr) {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+        return `${parts[0]}/${parts[1]}/${parts[2]}`;
+    }
+    return dateStr;
+}
+
+function parseExamDate(dateStr) {
+    if (!dateStr) return null;
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const year = parseInt(parts[2], 10);
+        return new Date(year, month, day);
+    }
+    return null;
+}
+
+function getCaThiTime(caThi) {
+    const caMap = {
+        '1': '7:30',
+        '2': '9:30',
+        '3': '13:30',
+        '4': '15:30'
+    };
+    return caMap[String(caThi).trim()] || caThi;
+}
+
+function mergeExamsByClassAndTime(exams) {
+    const mergedMap = new Map();
+    
+    exams.forEach(exam => {
+        const key = `${exam.maMH}|${exam.maLop}|${exam.ngayThi}|${exam.caThi}`;
+        
+        if (!mergedMap.has(key)) {
+            mergedMap.set(key, {
+                ...exam,
+                phongThiList: [exam.phongThi],
+                giangVienList: exam.giangVien ? [exam.giangVien] : []
+            });
+        } else {
+            const merged = mergedMap.get(key);
+            if (!merged.phongThiList.includes(exam.phongThi)) {
+                merged.phongThiList.push(exam.phongThi);
+            }
+            if (exam.giangVien && !merged.giangVienList.includes(exam.giangVien)) {
+                merged.giangVienList.push(exam.giangVien);
+            }
+        }
+    });
+    
+    return Array.from(mergedMap.values());
+}
+
+function populateExamDateFilter() {
+    if (!elements.examFilterDate) return;
+    
+    const dates = new Set();
+    appState.examSchedule.forEach(exam => {
+        if (exam.ngayThi) {
+            dates.add(formatExamDate(exam.ngayThi));
+        }
+    });
+    
+    elements.examFilterDate.innerHTML = '<option value="">Tất cả ngày</option>';
+    Array.from(dates).sort().forEach(date => {
+        const option = document.createElement('option');
+        option.value = date;
+        option.textContent = date;
+        elements.examFilterDate.appendChild(option);
+    });
+}
+
+function renderExamSchedule() {
+    if (!elements.examScheduleList || !elements.examScheduleEmpty) return;
+    
+    if (!appState.examSchedule || appState.examSchedule.length === 0) {
+        elements.examScheduleList.classList.add('hidden');
+        elements.examScheduleEmpty.classList.remove('hidden');
+        if (elements.examFilterDate) elements.examFilterDate.style.display = 'none';
+        return;
+    }
+    
+    elements.examScheduleEmpty.classList.add('hidden');
+    elements.examScheduleList.classList.remove('hidden');
+    if (elements.examFilterDate) elements.examFilterDate.style.display = 'inline-block';
+    
+    let filtered = [...appState.examSchedule];
+    
+    if (elements.examFilterDate && elements.examFilterDate.value) {
+        filtered = filtered.filter(exam => formatExamDate(exam.ngayThi) === elements.examFilterDate.value);
+    }
+    
+    const sortedExams = filtered.sort((a, b) => {
+        const dateA = parseExamDate(a.ngayThi);
+        const dateB = parseExamDate(b.ngayThi);
+        if (!dateA || !dateB) return 0;
+        if (dateA.getTime() !== dateB.getTime()) {
+            return dateA - dateB;
+        }
+        return parseInt(a.caThi || 0) - parseInt(b.caThi || 0);
+    });
+    
+    const groupedByDate = {};
+    sortedExams.forEach(exam => {
+        const date = formatExamDate(exam.ngayThi);
+        if (!groupedByDate[date]) {
+            groupedByDate[date] = [];
+        }
+        groupedByDate[date].push(exam);
+    });
+    
+    let html = '';
+    Object.keys(groupedByDate).sort().forEach(date => {
+        const exams = groupedByDate[date];
+        const mergedExams = mergeExamsByClassAndTime(exams);
+        
+        html += `
+            <div class="exam-date-group">
+                <div class="exam-date-header">
+                    <h3>${date}</h3>
+                    <span class="exam-count">${mergedExams.length} môn thi</span>
+                </div>
+                <div class="exam-items">
+        `;
+        
+        mergedExams.forEach(exam => {
+            const caTime = getCaThiTime(exam.caThi);
+            const phongThiDisplay = exam.phongThiList.length > 1 
+                ? exam.phongThiList.join(', ') 
+                : exam.phongThiList[0];
+            const giangVienDisplay = exam.giangVienList.length > 0 
+                ? exam.giangVienList.join(', ') 
+                : 'N/A';
+            
+            html += `
+                <div class="exam-item">
+                    <div class="exam-item-header">
+                        <div class="exam-subject">
+                            <span class="exam-code">${exam.maMH}</span>
+                            <span class="exam-name">${exam.tenMH}</span>
+                        </div>
+                        <div class="exam-time">
+                            <span class="exam-ca">Ca ${exam.caThi}</span>
+                            <span class="exam-time-value">${caTime}</span>
+                        </div>
+                    </div>
+                    <div class="exam-item-details">
+                        <div class="exam-detail-item">
+                            <i class="fas fa-map-marker-alt"></i>
+                            <span>Phòng: ${phongThiDisplay}${exam.phongThiList.length > 1 ? ` (${exam.phongThiList.length} phòng)` : ''}</span>
+                        </div>
+                        <div class="exam-detail-item">
+                            <i class="fas fa-user"></i>
+                            <span>GV: ${giangVienDisplay}</span>
+                        </div>
+                        <div class="exam-detail-item">
+                            <i class="fas fa-users"></i>
+                            <span>Lớp: ${exam.maLop}</span>
+                        </div>
+                        <div class="exam-detail-item">
+                            <i class="fas fa-calendar-day"></i>
+                            <span>Thứ ${exam.thu}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    });
+    
+    elements.examScheduleList.innerHTML = html;
+}
+
+let examScheduleUIInitialized = false;
+
+async function initExamScheduleUI() {
+    if (!elements.importExamScheduleBtn || examScheduleUIInitialized) return;
+    examScheduleUIInitialized = true;
+    
+    elements.importExamScheduleBtn.onclick = async () => {
+        try {
+            const res = await window.electronAPI.importExamScheduleFile();
+            if (res?.success && res.data) {
+                try {
+                    const exams = parseExamScheduleExcel(res.data);
+                    appState.examScheduleRaw = exams;
+                    
+                    const currentSemesterCourses = getCurrentSemesterCourses();
+                    const filtered = filterExamScheduleByCourses(exams, currentSemesterCourses);
+                    appState.examSchedule = filtered;
+                    
+                    await window.electronAPI.setSetting('examSchedule.raw', exams);
+                    await window.electronAPI.setSetting('examSchedule.filtered', filtered);
+                    
+                    populateExamDateFilter();
+                    renderExamSchedule();
+                    showNotification(`Đã import ${filtered.length} môn thi từ ${exams.length} môn trong file`, 'success');
+                } catch (parseError) {
+                    showNotification(`Lỗi parse file: ${parseError.message}`, 'error');
+                }
+            } else if (!res?.cancelled) {
+                showNotification(res?.error || 'Không thể đọc file Excel', 'error');
+            }
+        } catch (error) {
+            showNotification(`Lỗi: ${error.message}`, 'error');
+        }
+    };
+    
+    try {
+        const savedRaw = await window.electronAPI.getSetting('examSchedule.raw');
+        if (Array.isArray(savedRaw) && savedRaw.length > 0) {
+            appState.examScheduleRaw = savedRaw;
+            
+            if (appState.courses && appState.courses.length > 0) {
+                const currentSemesterCourses = getCurrentSemesterCourses();
+                const filtered = filterExamScheduleByCourses(savedRaw, currentSemesterCourses);
+                appState.examSchedule = filtered;
+                await window.electronAPI.setSetting('examSchedule.filtered', filtered);
+            } else {
+                const savedFiltered = await window.electronAPI.getSetting('examSchedule.filtered');
+                if (Array.isArray(savedFiltered) && savedFiltered.length > 0) {
+                    appState.examSchedule = savedFiltered;
+                }
+            }
+            
+            populateExamDateFilter();
+            renderExamSchedule();
+        }
+    } catch {}
+    
+    if (elements.examFilterDate) {
+        elements.examFilterDate.addEventListener('change', () => {
+            renderExamSchedule();
+        });
+    }
+}
+
+
+(function initButtonRipples(){
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('.btn');
+        if (!btn) return;
+        const rect = btn.getBoundingClientRect();
+        btn.style.setProperty('--rx', `${e.clientX - rect.left}px`);
+        btn.style.setProperty('--ry', `${e.clientY - rect.top}px`);
+    });
+})();

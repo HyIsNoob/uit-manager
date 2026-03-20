@@ -1,0 +1,288 @@
+## [3.2.0] - 2026-03-20
+
+### Tổng quan
+
+- Cải tiện **tổng quan**: thêm thông tin tóm tắt và **điều hướng nhanh** giữa các khu vực chính của app.
+- **Hồ sơ / thông tin**: bố cục và hiển thị bổ sung khi có dữ liệu đồng bộ.
+- **Cài đặt**: tùy chọn làm mới dữ liệu theo chu kỳ (khi bật), giảm thao tác tay.
+- **Quản lý bài tập**: nút **Làm mới** đặt **cùng hàng, bên phải**; bốn bộ lọc giữ nguyên thứ tự.
+- Cải thiện **QOL** và ổn định luồng làm việc.
+
+---
+
+## [3.1.0] - 2025-01-04
+
+### Tính năng mới
+- **Tự động đăng nhập**: Tự động đăng nhập tài khoản đã đăng nhập gần nhất khi mở app
+  - Nếu chỉ có 1 tài khoản → tự động đăng nhập luôn
+  - Nếu có nhiều tài khoản → tự động đăng nhập tài khoản đã đăng nhập gần nhất
+  - Loading screen hiển thị trong suốt quá trình auto login và load dữ liệu
+  - Không còn màn hình trắng khi auto login
+
+### Cải tiến
+- **UX**: Cải thiện trải nghiệm khởi động app với loading screen mượt mà
+- **Performance**: Tối ưu flow khởi động để giảm thời gian chờ
+
+---
+
+## [3.0.0] - 2025-01-04
+
+### Tính năng mới
+- **Lịch thi**: Module quản lý lịch thi hoàn toàn mới
+  - Import file Excel lịch thi từ trường
+  - Tự động lọc và hiển thị chỉ các môn thi của các môn học đang học trong học kỳ hiện tại
+  - Lọc theo lớp học (ví dụ: CS431.Q12 chỉ hiển thị Q12)
+  - Gộp các exam cùng môn/lớp/giờ nhưng khác phòng thành 1 card
+  - Filter theo ngày thi
+  - Hiển thị đầy đủ thông tin: ngày thi, giờ thi, phòng thi, giảng viên, lớp
+  - UI với animations và hover effects
+
+### UI/UX Improvements
+- **Sidebar**: Fix position để luôn hiển thị khi scroll
+- **Menu bar**: Ẩn menu bar (File, Edit, View, Window, Help) để giao diện gọn hơn
+- **Exam Schedule UI**: 
+  - Animations mượt mà (fadeInUp, slideInLeft, fadeInScale, pulse)
+  - Hover effects với transform và shadow
+  - Visual feedback với border accent và gradient backgrounds
+
+### Technical Improvements
+- Thêm thư viện `xlsx` để đọc file Excel
+- Parse Excel tự động tìm header
+- Logic lọc chính xác theo mã môn học và lớp học
+- Lưu/load local storage giống thời khóa biểu
+- Tự động re-filter khi courses được load
+
+### Bug Fixes
+- Sửa sidebar bị overlap với header
+- Sửa logic lọc để chỉ hiển thị môn học của học kỳ hiện tại
+
+---
+
+## [2.4.1] - 2025-01-03
+
+### 🐛 Bug Fixes
+- **Delete Modal Visibility**: Sửa lỗi modal xóa deadline không hiển thị nội dung
+- **Modal Animation**: Thêm class `showing` để trigger entrance animation
+- **Event Handling**: Cải thiện event listeners để tránh conflict
+- **Modal State**: Proper cleanup với `no-scroll` class management
+
+### 🎨 UI/UX Improvements
+- **Modal Layout**: Điều chỉnh kích thước modal xóa (rộng hơn, ngắn hơn)
+- **Responsive Design**: Modal responsive với `90vw` width
+- **Animation**: Smooth entrance và exit animations
+- **Consistent Behavior**: Modal hoạt động giống modal deadline chính
+
+### 🔧 Technical Improvements
+- **Event Delegation**: Sử dụng event delegation thay vì inline onclick
+- **State Management**: Sử dụng dataset để lưu deadline ID
+- **Error Handling**: Proper try-catch cho delete operations
+- **Code Cleanup**: Loại bỏ test data và debug logs
+
+---
+
+## [2.4.0] - 2025-01-03
+
+### 🎨 UI/UX Nâng Cấp Deadline Management
+- **Modal 3-tab**: Chia giao diện tạo deadline thành 3 tab (Sơ bộ/Chi tiết/Nhãn) với progress bar
+- **Glassmorphism Design**: Áp dụng hiệu ứng kính mờ hiện đại cho toàn bộ giao diện
+- **Animations & Transitions**: Thêm hiệu ứng chuyển động mượt mà, hover effects, shimmer effects
+- **Responsive Layout**: Tối ưu cho mọi kích thước màn hình
+
+### 🔍 Tìm Kiếm & Sắp Xếp Nâng Cao
+- **Search Enhancement**: Tìm kiếm theo tiêu đề, mô tả, tags, tên môn học
+- **Smart Sorting**: 4 tùy chọn sắp xếp (Gần nhất, Xa nhất, Tiêu đề, Mới tạo)
+- **Filter System**: Lọc theo trạng thái (Tất cả, Chưa hoàn thành, Đã hoàn thành, Quá hạn)
+- **Equal Sizing**: 3 ô search/filter/sort có kích thước cân đối
+
+### ⏰ Countdown Timer & Visual Feedback
+- **Real-time Countdown**: Hiển thị thời gian còn lại trực quan (X phút, X giờ, X ngày)
+- **Color-coded Status**: Màu sắc cảnh báo theo mức độ khẩn cấp
+- **Status Indicators**: Dots và badges trạng thái rõ ràng
+
+### 🎯 Enhanced User Experience
+- **Keyboard Shortcuts**: Esc để đóng, Ctrl+Arrow để chuyển tab, 1-3 để nhảy tab
+- **Auto-advance Prevention**: Không tự động chuyển tab khi đang nhập
+- **Smart Button Logic**: Nút "Tiếp theo" ẩn ở tab cuối
+- **Improved Form Flow**: Logic chuyển tab thông minh
+
+### 🌓 Theme Support
+- **Light/Dark Mode**: Placeholder và styling tối ưu cho cả 2 theme
+- **Consistent Colors**: Màu sắc nhất quán trong mọi điều kiện
+- **Accessibility**: Đảm bảo khả năng tiếp cận tốt
+
+### 🔧 Technical Improvements
+- **Performance**: Tối ưu rendering với will-change và backface-visibility
+- **Error Handling**: Xử lý lỗi tốt hơn với fallback data
+- **Code Quality**: Refactor và clean up code
+- **Debug Support**: Thêm logging để troubleshoot
+
+### 🐛 Bug Fixes
+- **Modal Visibility**: Sửa lỗi modal không hiển thị khi mở
+- **Sort Functionality**: Khắc phục lỗi sắp xếp không hoạt động
+- **Text Visibility**: Sửa lỗi text bị che khuất trong tabs
+- **Color Picker**: Cải thiện visibility và styling
+- **Date/Time Picker**: Nâng cấp giao diện và UX
+
+---
+
+## [2.3.1] - 2025-09-25
+
+### UI/UX
+- Tools: chuyển sang giao diện tabs với hiệu ứng chuyển mượt, nổi bật tab active.
+- DKHP Tool: bổ sung nút mở dkhp-uit.vercel.app bằng trình duyệt mặc định; nút Generate/Copy có animation ripple/pulse; card bố cục gọn và dễ thao tác.
+
+---
+
+## [2.3.0] - 2025-09-25
+
+### Sửa lỗi / Cải tiến
+- Thời khóa biểu: chỉ highlight đúng môn đang diễn ra trong cột của ngày hôm nay (khắc phục trường hợp tô nhầm cột/ngày, ví dụ T5 → cs431 thay vì T3 → cs231).
+- Cập nhật ứng dụng: khi bấm “Khởi động lại để cập nhật”, ứng dụng sẽ đóng hoàn toàn (tắt cả chạy ngầm/Tray) rồi mới cài đặt, không cần tắt thủ công.
+- Tools → Khảo sát tự động (đang test nhưng chưa có cơ hội test :D)
+
+---
+
+## [2.2.3] - 2025-09-24
+
+### Enhancement
+- Thêm 2 filter sắp xếp theo ngày giao: "Giao mới nhất" và "Giao cũ nhất"
+- Cho phép người dùng thay đổi trạng thái bài tập nhóm (tick/untick) thay vì cố định
+- Sắp xếp bài tập đã qua hạn và đã nộp xuống dưới cùng danh sách
+- Undo việc click bài tập mở chi tiết để tránh xung đột với checkbox
+
+---
+
+## [2.2.2] - 2025-09-24
+
+### Small Fix
+- Sửa lỗi highlight thời khóa biểu: chỉ highlight môn học cụ thể đang diễn ra, không phải cả hàng tiết
+- Sửa lỗi overlapping khi hover các môn học trong light mode
+- Cải thiện hiển thị tiết cuối không bị che
+
+---
+
+## [2.2.1] - 2025-09-24
+
+### Hotfix
+- Chặn mở nhiều instance ứng dụng (single-instance lock). Nếu mở lại khi đang chạy nền, ứng dụng sẽ focus/hiện cửa sổ hiện có.
+
+---
+
+## [2.2.0] - 2025-09-24
+
+### Mới/Thay đổi
+- Chi tiết môn: thêm các vùng thu gọn/mở rộng (Bài tập, Thông báo, Tài liệu, Liên kết, Nội dung theo tuần/phần, Trang) kèm animation mượt.
+- Stat cards cuộn đến đúng vùng (giữ tiêu đề hiển thị), tự mở vùng mục tiêu.
+- Nút “Lên đầu trang” dạng icon tròn, nổi góc phải dưới, chỉ hiện khi cuộn.
+- Di chuyển Dark/Light toggle vào phần Cài đặt.
+- Quản lý bài tập: click vào card để mở chi tiết bài tập nhanh.
+
+### Sửa lỗi
+- Sửa lệch click 1 ngày trên lịch tháng; click đúng ngày mở đúng nội dung.
+- Sửa đường kẻ TKB đè lên block môn ở dark mode; tăng z-index và mask.
+- Ổn định hệ thống thông báo: chỉ thông báo bài tập mới trong phiên đang chạy; rút ngắn thời lượng toast.
+
+---
+# Changelog
+
+Tất cả thay đổi đáng chú ý của dự án sẽ được ghi tại đây.
+
+## [2.1.0] - 2025-09-24
+
+### Mới/Thay đổi
+- Tray & chạy nền: đóng cửa sổ sẽ ẩn xuống khay, click biểu tượng để mở lại.
+- Thông báo tối giản: chỉ thông báo bài tập mới xuất hiện trong khi app đang chạy; không bắn lại lịch sử khi mở app.
+- Thêm cài đặt "Thu nhỏ xuống khay khi đóng" và "Bỏ qua mục cũ quá (ngày)".
+- Rút ngắn thời lượng thông báo: in-app toast ~3s; Windows toast 3s.
+- Đồng hồ hệ thống trên header: hiển thị HH:MM • Th X, dd/mm/yyyy.
+- Sửa hiển thị TKB dark mode: loại đường kẻ/hairlines.
+
+### Sửa lỗi/Ổn định
+- Tránh spam thông báo khi mở lại ứng dụng.
+
+---
+
+## [2.0.0] - 2025-09-24
+
+### Thay đổi
+- UI: Thay lịch tuần bằng lịch tháng có thứ, thêm legend (Khẩn cấp/Sắp tới/Đã nộp/Nhóm) và đếm số bài tập theo ngày; có điều hướng tháng trước/sau.
+- UI: Gỡ bỏ hoàn toàn phần "Thao tác nhanh" và các modal liên quan (Quick Notes/Schedule) để giao diện gọn nhẹ hơn.
+
+### Điểm nổi bật
+- Module Thời khóa biểu (TKB) mới hoàn toàn: render bằng CSS Grid, hiển thị ngày theo hàng ngang, các môn học tự gộp nhiều tiết theo đúng chuỗi "Tiết" trong file .ics.
+- Trải nghiệm trực quan: highlight tiết hiện tại và môn đang diễn ra theo thời gian thực.
+
+### Tính năng mới / Thay đổi lớn
+- Trích xuất thêm: Mã môn (`CODE.Qxx`), Giảng viên, Phòng học, dải tiết; lưu vào cấu trúc `timetableEvents`.
+- UI card môn học trong TKB: Mã môn (đậm), Tên rút gọn, Phòng (đậm), Giảng viên; ẩn dòng Tiết nếu không cần thiết (có thể bật lại dễ dàng qua CSS).
+- Lưu trữ cục bộ giảm thời gian load danh sách bài tập
+- Cải tiến giao diện: bảng danh sách bài tập, chi tiết bài tập, chi tiết môn học
+- Cải tiến UI dashboard (dù vẫn như hạch)
+- Thêm hệ thống sắp đến dealine, hệ thống ghim bài tập, hệ thống ghi chú thông qua word
+- Các thay đổi về UI/UX khác
+
+### Ghi chú nâng cấp
+- Người dùng bản 1.x nâng cấp thẳng lên 2.0.0: dữ liệu bài tập và token không bị ảnh hưởng.
+- Nếu đã tùy chỉnh file `.ics` cũ: chỉ cần import lại để áp dụng parser mới (không bắt buộc).
+---
+
+## [1.2.0] - 2025-09-22
+
+### Mới/Thay đổi
+- Đưa action “Mở web/Quay lại” về header của trang chi tiết môn; bỏ khỏi header chung
+- Bổ sung loading overlay khi:
+  - Mở chi tiết môn học
+  - Mở chi tiết bài tập
+  - Mở đường dẫn ngoài (course/assignment)
+- Tối ưu UI login: nhóm TLS toggle gọn đẹp
+- Cập nhật hiển thị phiên bản trong Cài đặt lấy từ app (IPC)
+- Đổi installer.
+ - Nhận diện bài tập nhóm dựa trên cờ cấu hình từ API (teamsubmission) kèm heuristic fallback; thêm cơ chế cache bài tập theo user/course (bộ nhớ tạm + lưu trữ cục bộ) để tăng tốc tải và hiển thị lịch ngay khi mở app.
+
+### Sửa lỗi
+- Lỗi không hiển thị chi tiết do thiếu `ensureUrlWithToken`
+- Một số luồng không mở được chi tiết course sau khi dọn UI
+
+---
+
+## [1.1.0] - 2025-09-22
+
+### Điểm nổi bật
+- Phát hành chính thức đầu tiên với cơ chế auto-update qua GitHub Releases
+- Giao diện dark theme theo màu thương hiệu UIT, responsive
+- Hệ thống thông báo thông minh (Windows Toast + in-app)
+
+### Tính năng mới
+- Đăng nhập bằng MSSV, lưu token mã hóa cục bộ
+- Dashboard tổng quan: thống kê môn học, bài tập, cảnh báo sắp hạn
+- Lọc bài tập theo học kỳ, môn học, trạng thái (đã nộp/chưa nộp/nộp muộn)
+- Xem chi tiết bài tập, hạn chót, thời điểm nộp
+- Lấy thông báo/thảo luận từ diễn đàn môn học (announcements)
+- Quản lý nhiều tài khoản trên cùng máy
+
+### Cải tiến
+- README mới, cấu trúc chuyên nghiệp, hướng dẫn build/release rõ ràng
+- Cấu hình `electron-builder` publish lên GitHub repo `HyIsNoob/uit-manager`
+- Đồng bộ icon Windows khi đóng gói (sử dụng `favicon.ico`)
+
+### Sửa lỗi/ổn định
+- Khắc phục lỗi encoding cuối file README cũ
+- Bổ sung kiểm tra lỗi/fallback khi gọi API Moodle
+
+### Phụ thuộc/chứa năng kỹ thuật
+- Electron 38.x, electron-builder 24.x
+- Axios, electron-store, electron-updater
+- Tự động kiểm tra cập nhật khi khởi động (`checkForUpdatesAndNotify`)
+
+### Nâng cấp từ phiên bản cũ
+- Nếu đang dùng 1.0.x: mở ứng dụng 1.0.x, hệ thống sẽ tự tải về 1.1.0 và đề xuất cài đặt khi thoát ứng dụng.
+
+---
+
+## [1.0.x] - Tiền phát hành (internal)
+- Khung ứng dụng Electron, tích hợp cơ bản với Moodle API
+- Các màn hình cơ bản và lưu trữ tài khoản cục bộ
+
+---
+
+Liên kết dự án: https://github.com/HyIsNoob/uit-manager

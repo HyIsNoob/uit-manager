@@ -1,0 +1,74 @@
+{
+  "name": "uit-assignment-manager",
+  "version": "3.2.0",
+  "description": "Ứng dụng quản lý bài tập cho sinh viên UIT",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "dist": "electron-builder --publish=never",
+    "release": "electron-builder --publish=always"
+  },
+  "keywords": [
+    "uit",
+    "assignment",
+    "moodle",
+    "electron"
+  ],
+  "author": "Khang Hy",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^38.1.2",
+    "electron-builder": "^24.6.4"
+  },
+  "dependencies": {
+    "axios": "^1.7.5",
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.3.9",
+    "node-notifier": "^10.0.1",
+    "puppeteer": "^24.22.3",
+    "xlsx": "^0.18.5"
+  },
+  "build": {
+    "appId": "com.uit.assignment-manager",
+    "productName": "UIT Assignment Manager",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*",
+      "favicon.ico"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "favicon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "UIT Assignment Manager",
+      "uninstallDisplayName": "UIT Assignment Manager"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "HyIsNoob",
+        "repo": "uit-manager"
+      }
+    ]
+  }
+}

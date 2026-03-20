@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UIT Assignment Manager</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <button id="scroll-top-btn" class="btn btn-outline" title="Lên đầu trang">
+        <i class="fas fa-arrow-up"></i>
+    </button>
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="loading-content">
+            <div class="logo-container">
+                <img src="../../assets/uit_logo.png" alt="UIT Logo" class="logo">
+                <div class="logo-glow"></div>
+            </div>
+            <div class="loading-text">
+                <h2>UIT Assignment Manager</h2>
+                <p>Đang khởi tạo ứng dụng...</p>
+            </div>
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Screen -->
+    <div id="login-screen" class="login-screen hidden">
+        <div class="login-container">
+            <div class="login-header">
+                <div class="logo-section">
+                    <img src="../../assets/uit_logo.png" alt="UIT Logo" class="login-logo">
+                    <h1>UIT Assignment Manager</h1>
+                    <p>Quản lý bài tập một cách thông minh</p>
+                </div>
+            </div>
+
+            <div class="login-content">
+                <!-- New User Registration -->
+                <div id="new-user-form" class="auth-form hidden">
+                    <h2>Đăng ký tài khoản mới</h2>
+                    <div class="form-group">
+                        <label for="new-student-id">Mã số sinh viên</label>
+                        <input type="text" id="new-student-id" placeholder="Nhập mã số sinh viên" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-token">Token API Moodle</label>
+                        <input type="password" id="new-token" placeholder="Nhập token API" required>
+                        <small>Token này sẽ được lưu trữ an toàn trên máy tính của bạn</small>
+                    </div>
+                    <button id="register-btn" class="btn btn-primary">
+                        <i class="fas fa-user-plus"></i>
+                        Đăng ký tài khoản
+                    </button>
+                    <div class="form-switch">
+                        <span>Đã có tài khoản?</span>
+                        <a href="#" id="switch-to-login">Đăng nhập ngay</a>
+                    </div>
+                </div>
+
+                <!-- Existing User Login -->
+                <div id="existing-user-form" class="auth-form">
+                    <h2>Đăng nhập</h2>
+                    <div class="form-group">
+                        <label for="student-id">Mã số sinh viên</label>
+                        <select id="student-id" required>
+                            <option value="">Chọn mã số sinh viên</option>
+                        </select>
+                    </div>
+                    <button id="login-btn" class="btn btn-primary">
+                        <i class="fas fa-sign-in-alt"></i>
+                        Đăng nhập
+                    </button>
+                    <div class="form-switch">
+                        <span>Chưa có tài khoản?</span>
+                        <a href="#" id="switch-to-register">Đăng ký mới</a>
+                    </div>
+                    <div class="account-actions">
+                        <button id="remove-account-btn" class="btn btn-danger btn-small">
+                            <i class="fas fa-trash"></i>
+                            Xóa tài khoản đã chọn
+                        </button>
+                    </div>
+                    <div class="form-group tls-toggle">
+                        <input type="checkbox" id="login-allow-insecure-tls" />
+                        <label for="login-allow-insecure-tls">Bỏ qua kiểm tra chứng chỉ TLS</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="login-footer">
+                <p>&copy; 2025 UIT Assignment Manager. Phát triển bởi Hy.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Application -->
+    <div id="main-app" class="main-app hidden">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-left">
+                <img src="../../assets/uit_logo.png" alt="UIT Logo" class="header-logo">
+                <h1>UIT Assignment Manager</h1>
+            </div>
+            <div class="header-right">
+                <button id="scroll-top-btn" class="btn btn-outline" style="position:fixed; right:16px; bottom:64px; z-index:1000; width:auto; display:none;">
+                    <i class="fas fa-arrow-up"></i>
+                    Lên đầu trang
+                </button>
+                <div class="user-info" id="realtime-clock" title="Giờ hệ thống">
+                    <i class="fas fa-clock"></i>
+                    <span id="clock-text">--:--:--</span>
+                </div>
+                <div class="user-info">
+                    <i class="fas fa-user"></i>
+                    <span id="user-name">Sinh viên</span>
+                </div>
+                <button id="logout-btn" class="btn btn-outline">
+                    <i class="fas fa-sign-out-alt"></i>
+                    Đăng xuất
+                </button>
+            </div>
+        </header>
+        
+
+        <!-- Main Content -->
+        <main class="app-main">
+            <!-- Sidebar -->
+            <aside class="sidebar" id="sidebar">
+                <div class="sidebar-header">
+                    <div class="sidebar-logo">
+                        <i class="fas fa-graduation-cap"></i>
+                        <span class="logo-text">UIT Manager</span>
+                    </div>
+                </div>
+                
+                <nav class="sidebar-nav">
+                    <div class="nav-section">
+                        <div class="nav-item active" data-section="dashboard">
+                            <div class="nav-icon">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                            <span class="nav-text">Dashboard</span>
+                        </div>
+                        
+                        <div class="nav-item" data-section="assignments">
+                            <div class="nav-icon">
+                                <i class="fas fa-tasks"></i>
+                            </div>
+                            <span class="nav-text">Bài tập</span>
+                        </div>
+                        <div class="nav-item" data-section="custom-deadlines">
+                            <div class="nav-icon">
+                                <i class="fas fa-bell"></i>
+                            </div>
+                            <span class="nav-text">Make deadline</span>
+                        </div>
+                        
+                        <div class="nav-item" data-section="courses">
+                            <div class="nav-icon">
+                                <i class="fas fa-book-open"></i>
+                            </div>
+                            <span class="nav-text">Khóa học</span>
+                        </div>
+                        <div class="nav-item" data-section="timetable">
+                            <div class="nav-icon">
+                                <i class="fas fa-calendar-week"></i>
+                            </div>
+                            <span class="nav-text">Thời khóa biểu</span>
+                        </div>
+
+                        <div class="nav-item" data-section="schedule-updates">
+                            <div class="nav-icon">
+                                <i class="fas fa-calendar-xmark"></i>
+                            </div>
+                            <span class="nav-text">Nghỉ/Bù</span>
+                        </div>
+
+                        <div class="nav-item" data-section="grades">
+                            <div class="nav-icon">
+                                <i class="fas fa-square-poll-vertical"></i>
+                            </div>
+                            <span class="nav-text">Điểm</span>
+                        </div>
+                        
+                        <div class="nav-item" data-section="exam-schedule">
+                            <div class="nav-icon">
+                                <i class="fas fa-calendar-alt"></i>
+                            </div>
+                            <span class="nav-text">Lịch thi</span>
+                        </div>
+                        
+                        <div class="nav-item" data-section="tools">
+                            <div class="nav-icon">
+                                <i class="fas fa-tools"></i>
+                            </div>
+                            <span class="nav-text">Tools</span>
+                        </div>
+                        
+                        <div class="nav-item" data-section="settings">
+                            <div class="nav-icon">
+                                <i class="fas fa-cog"></i>
+                            </div>
+                            <span class="nav-text">Cài đặt</span>
+                        </div>
+                    </div>
+                </nav>
+                
+                <div class="sidebar-footer">
+                    <div class="user-profile">
+                        <div class="user-avatar">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div class="user-info">
+                            <span class="user-name" id="sidebar-user-name">Sinh viên</span>
+                            <span class="user-status">Đang hoạt động</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Content Area -->
+            <div class="content-area">
+                <!-- Dashboard Section -->
+                <section id="dashboard-section" class="content-section">
+                    <div class="section-header">
+                        <h2>Tổng quan</h2>
+                        <div class="header-actions">
+                            <button id="export-calendar-btn" class="btn btn-outline btn-small">
+                                <i class="fas fa-calendar-plus"></i>
+                                Xuất lịch
+                            </button>
+                            <button id="refresh-data-btn" class="btn btn-primary">
+                                <i class="fas fa-sync-alt"></i>
+                                Làm mới dữ liệu
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Smart Stats Grid -->
+                    <div class="dashboard-context-strip">
+                        <span id="dashboard-context-line" class="dashboard-context-text"></span>
+                        <span id="dashboard-stc-gpa" class="dashboard-stc-gpa"></span>
+                    </div>
+                    <div class="dashboard-quick-nav" role="navigation" aria-label="Đi nhanh">
+                        <button type="button" class="dq-link" data-nav-section="assignments">Bài tập</button>
+                        <button type="button" class="dq-link" data-nav-section="grades">Điểm</button>
+                        <button type="button" class="dq-link" data-nav-section="schedule-updates">Nghỉ/Bù</button>
+                        <button type="button" class="dq-link" data-nav-section="timetable">Thời khóa biểu</button>
+                        <button type="button" class="dq-link" data-nav-section="exam-schedule">Lịch thi</button>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-card priority-high">
+                            <div class="stat-icon">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="urgent-assignments">0</h3>
+                                <p>Bài tập khẩn cấp</p>
+                                <div class="stat-trend" id="urgent-trend">
+                                    <i class="fas fa-arrow-up"></i>
+                                    <span>+2 hôm nay</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="stat-card priority-medium">
+                            <div class="stat-icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="upcoming-assignments">0</h3>
+                                <p>Sắp đến hạn</p>
+                                <div class="stat-trend" id="upcoming-trend">
+                                    <i class="fas fa-arrow-down"></i>
+                                    <span>-1 tuần này</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="stat-card priority-low">
+                            <div class="stat-icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="completed-assignments">0</h3>
+                                <p>Đã hoàn thành</p>
+                                <div class="stat-trend" id="completed-trend">
+                                    <i class="fas fa-arrow-up"></i>
+                                    <span>+3 tuần này</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="completion-rate">0%</h3>
+                                <p>Tỷ lệ hoàn thành</p>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="completion-progress"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Smart Dashboard Content -->
+                    <div class="dashboard-content">
+                        <div class="content-grid">
+                            <!-- Today's Focus -->
+                            <div class="content-card focus-card">
+                                <div class="card-header">
+                                    <h3><i class="fas fa-bullseye"></i> Tập trung hôm nay</h3>
+                                    <div class="focus-actions">
+                                        <button class="btn-icon" id="focus-settings" title="Cài đặt">
+                                            <i class="fas fa-cog"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="today-focus" class="focus-content">
+                                    <div class="focus-item">
+                                        <div class="focus-priority high"></div>
+                                        <div class="focus-details">
+                                            <h4>Bài tập cần làm ngay</h4>
+                                            <p id="urgent-today">Đang tải...</p>
+                                        </div>
+                                    </div>
+                                    <div class="focus-item">
+                                        <div class="focus-priority medium"></div>
+                                        <div class="focus-details">
+                                            <h4>Chuẩn bị cho tuần tới</h4>
+                                            <p id="upcoming-week">Đang tải...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Smart Calendar (Month View) -->
+                            <div class="content-card calendar-card">
+                                <div class="card-header">
+                                    <h3><i class="fas fa-calendar-alt"></i> Lịch tháng</h3>
+                                    <div class="calendar-actions">
+                                        <button class="btn-icon" id="prev-month" title="Tháng trước">
+                                            <i class="fas fa-chevron-left"></i>
+                                        </button>
+                                        <span id="current-month">Tháng hiện tại</span>
+                                        <button class="btn-icon" id="next-month" title="Tháng sau">
+                                            <i class="fas fa-chevron-right"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="month-calendar" class="month-calendar">
+                                    <!-- Month calendar will be populated by JS -->
+                                </div>
+                                <div class="calendar-legend">
+                                    <span class="legend-item"><span class="legend-dot urgent"></span> Khẩn</span>
+                                    <span class="legend-item"><span class="legend-dot upcoming"></span> Sắp đến hạn</span>
+                                    <span class="legend-item"><span class="legend-dot submitted"></span> Đã nộp</span>
+                                    <span class="legend-item"><span class="legend-dot group"></span> Nhóm</span>
+                                </div>
+                            </div>
+
+                            <!-- Progress Overview -->
+                            <div class="content-card progress-card">
+                                <div class="card-header">
+                                    <h3><i class="fas fa-chart-pie"></i> Tiến độ học kỳ</h3>
+                                </div>
+                                <div id="semester-progress" class="progress-overview">
+                                    <div class="progress-item">
+                                        <div class="progress-label">Học kỳ hiện tại</div>
+                                        <div class="progress-bar">
+                                            <div class="progress-fill" id="semester-progress-fill"></div>
+                                        </div>
+                                        <div class="progress-text" id="semester-progress-text">0%</div>
+                                    </div>
+                                    <div class="progress-stats">
+                                        <div class="stat-item">
+                                            <span class="stat-number" id="semester-assignments">0</span>
+                                            <span class="stat-label">Bài tập</span>
+                                        </div>
+                                        <div class="stat-item">
+                                            <span class="stat-number" id="semester-courses">0</span>
+                                            <span class="stat-label">Môn học</span>
+                                        </div>
+                                        <div class="stat-item">
+                                            <span class="stat-number" id="semester-days-left">0</span>
+                                            <span class="stat-label">Ngày còn lại</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Removed Quick Actions -->
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Course Color Picker Modal -->
+                <div id="course-color-modal" class="modal hidden">
+                    <div class="modal-content small">
+                        <h3>Chọn màu cho môn học</h3>
+                        <div class="color-preview" id="color-preview"></div>
+                        <input type="color" id="course-color-input" value="#b5f5e9" />
+                        <div class="modal-actions">
+                            <button id="save-course-color" class="btn btn-primary btn-small"><i class="fas fa-save"></i> Lưu</button>
+                            <button id="reset-course-color" class="btn btn-outline btn-small"><i class="fas fa-undo"></i> Mặc định</button>
+                            <button id="close-course-color" class="btn btn-small">Đóng</button>
+                        </div>
+                        <div class="modal-meta" id="course-color-meta"></div>
+                    </div>
+                </div>
+
+                <!-- Timetable Section -->
+                <section id="timetable-section" class="content-section hidden timetable-enhanced">
+                    <div class="section-header timetable-header-centered">
+                        <h2 class="tkb-title" data-animate>Thời khóa biểu</h2>
+                    </div>
+
+                    <div id="timetable-guide" class="info-card" style="margin-bottom:12px">
+                        <p>
+                            Hướng dẫn: Nhấn "Mở trang TKB", đăng nhập cổng sinh viên. Ở trang thời khóa biểu, tìm liên kết 
+                            "Nhấn vào đây để Thêm TKB vào GoogleCalendar/Calendar" để tải file <code>MSSV_scheduled.ics</code> về máy, sau đó nhấn "Import .ics" để nhập vào ứng dụng.
+                        </p>
+                    </div>
+
+                    <div class="timetable-toolbar hidden">
+                        <div class="tt-week-label" id="tt-week-label"></div>
+                    </div>
+
+                    <div id="timetable-grid" class="timetable-grid">
+                        <!-- Weekly grid rendered by app.js -->
+                    </div>
+
+                    <div class="timetable-actions-below">
+                        <label class="tt-source-picker">
+                            <span>Nguồn</span>
+                            <select id="timetable-source">
+                                <option value="ics">ICS</option>
+                                <option value="api">API</option>
+                            </select>
+                        </label>
+                        <button id="open-tkb-web" class="btn btn-outline btn-small" title="Mở trang TKB để tải file .ics">
+                            <i class="fas fa-external-link-alt"></i>
+                            Mở trang TKB
+                        </button>
+                        <button id="import-ics-btn" class="btn btn-primary btn-small" title="Nhập file .ics từ máy">
+                            <i class="fas fa-file-import"></i>
+                            Import .ics
+                        </button>
+                    </div>
+                </section>
+
+                <section id="schedule-updates-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Lịch nghỉ/bù</h2>
+                        <div class="header-actions">
+                            <button id="stc-refresh-updates" class="btn btn-primary btn-small">Làm mới</button>
+                        </div>
+                    </div>
+
+                    <div class="stc-banner">
+                        <div class="stc-banner-meta" id="stc-banner-updates"></div>
+                        <button id="stc-open-profile-updates" class="btn btn-outline btn-small">Thiết lập</button>
+                    </div>
+
+                    <div class="stc-filters">
+                        <input type="text" id="schedule-updates-search" placeholder="Tìm theo mã lớp / môn / nội dung">
+                        <select id="schedule-updates-course">
+                            <option value="">Tất cả môn (kỳ hiện tại)</option>
+                        </select>
+                        <select id="schedule-updates-type">
+                            <option value="">Tất cả</option>
+                            <option value="BN">Nghỉ</option>
+                            <option value="BB">Bù</option>
+                        </select>
+                        <select id="schedule-updates-range" title="Lọc theo đã diễn ra hay chưa">
+                            <option value="active">Chưa diễn ra (mặc định)</option>
+                            <option value="all">Tất cả</option>
+                            <option value="archive">Đã qua (lưu trữ)</option>
+                        </select>
+                        <select id="schedule-updates-sort">
+                            <option value="event_asc">Ngày buổi: sớm → muộn</option>
+                            <option value="event_desc">Ngày buổi: muộn → sớm</option>
+                            <option value="posted_new">Thông báo: mới → cũ</option>
+                            <option value="posted_old">Thông báo: cũ → mới</option>
+                        </select>
+                    </div>
+
+                    <div id="schedule-updates-list" class="stc-list"></div>
+                </section>
+
+                <section id="grades-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Điểm</h2>
+                        <div class="header-actions">
+                            <button id="stc-refresh-grades" class="btn btn-primary btn-small">Làm mới</button>
+                        </div>
+                    </div>
+
+                    <div class="stc-banner">
+                        <div class="stc-banner-meta" id="stc-banner-grades"></div>
+                        <button id="stc-open-profile-grades" class="btn btn-outline btn-small">Thiết lập</button>
+                    </div>
+
+                    <div class="stc-filters">
+                        <input type="text" id="grades-search" placeholder="Tìm theo mã môn / tên môn / mã lớp">
+                        <select id="grades-semester">
+                            <option value="">Tất cả kỳ</option>
+                        </select>
+                        <select id="grades-sort">
+                            <option value="newest">Mới nhất</option>
+                            <option value="oldest">Cũ nhất</option>
+                        </select>
+                    </div>
+                    <div id="grades-summary" class="stc-grades-summary"></div>
+                    <div id="grades-content" class="stc-grades"></div>
+                </section>
+
+                <!-- Exam Schedule Section -->
+                <section id="exam-schedule-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Lịch thi</h2>
+                        <div class="header-actions">
+                            <select id="exam-filter-date" class="filter-select" style="min-width: 200px;">
+                                <option value="">Tất cả ngày</option>
+                            </select>
+                            <button id="import-exam-schedule-btn" class="btn btn-primary">
+                                <i class="fas fa-file-import"></i>
+                                Import file Excel
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="exam-schedule-content">
+                        <div id="exam-schedule-empty" class="empty-state">
+                            <i class="fas fa-calendar-times"></i>
+                            <h3>Chưa có lịch thi</h3>
+                            <p>Vui lòng import file Excel lịch thi để xem lịch thi của bạn.</p>
+                        </div>
+                        <div id="exam-schedule-list" class="exam-schedule-list hidden"></div>
+                    </div>
+                </section>
+
+                <!-- Tools Section -->
+                <section id="tools-section" class="content-section hidden">
+                    <h2 class="section-title">Tools</h2>
+
+                    <div class="tools-tabs">
+                        <button class="tools-tab active" data-tool="survey"><i class="fas fa-robot"></i><span>Khảo sát tự động</span></button>
+                        <button class="tools-tab" data-tool="dkhp"><i class="fas fa-clipboard-check"></i><span>Đăng ký học phần</span></button>
+                    </div>
+
+                    <div class="tools-panels">
+                        <div class="tools-panel" data-tool-panel="survey">
+                            <!-- Khảo sát tự động toolcard existing -->
+                            <div class="tool-card">
+                                <div class="tool-header">
+                                    <div class="tool-icon">
+                                        <i class="fas fa-poll"></i>
+                                    </div>
+                                    <div class="tool-info">
+                                        <h3>Khảo sát tự động</h3>
+                                        <p>Tự động thực hiện khảo sát cuối kỳ của trường</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="tool-content">
+                                    <div class="survey-form">
+                                        <div class="form-group">
+                                            <label for="survey-email">Mã số sinh viên</label>
+                                            <input type="text" id="survey-email" placeholder="Nhập MSSV của bạn">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="survey-password">Mật khẩu</label>
+                                            <input type="password" id="survey-password" placeholder="Nhập mật khẩu">
+                                        </div>
+                                        
+                                        <div class="survey-actions">
+                                            <button id="start-survey-btn" class="btn btn-primary">
+                                                <i class="fas fa-play"></i>
+                                                Bắt đầu khảo sát
+                                            </button>
+                                            <button id="pause-survey-btn" class="btn btn-warning hidden">
+                                                <i class="fas fa-pause"></i>
+                                                Tạm dừng
+                                            </button>
+                                            <button id="stop-survey-btn" class="btn btn-danger hidden">
+                                                <i class="fas fa-stop"></i>
+                                                Dừng
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="survey-status">
+                                        <div class="status-indicator">
+                                            <span id="survey-status-text">Sẵn sàng</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="survey-log">
+                                        <h4>Nhật ký hoạt động</h4>
+                                        <div id="survey-log-content" class="log-content">
+                                            <p class="log-entry">Chờ bắt đầu khảo sát...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="tools-panel hidden" data-tool-panel="dkhp">
+                            <!-- Tool: Đăng ký học phần -->
+                            <div class="tool-card" id="dkhp-tool">
+                                <div class="tool-header">
+                                    <div class="tool-icon"><i class="fas fa-clipboard-check"></i></div>
+                                    <div class="tool-info">
+                                        <h3>Đăng ký học phần (DKHP)</h3>
+                                        <p>Giới thiệu trang hỗ trợ ĐKHP và sinh script tự động chọn lớp theo danh sách mã lớp.</p>
+                                    </div>
+                                </div>
+
+                                <div class="dkhp-body">
+                                    <div class="dkhp-about">
+                                        <p>
+                                            Trang hỗ trợ ĐKHP và tạo danh sách lớp: 
+                                            <div class="dkhp-actions-top">
+                                                <button id="dkhp-open-web" class="btn accent"><i class="fas fa-external-link-alt"></i> Mở dkhp-uit.vercel.app</button>
+                                                <a class="btn ghost" href="https://github.com/loia5tqd001/Dang-Ky-Hoc-Phan-UIT" target="_blank" rel="noreferrer"><i class="fab fa-github"></i> Repo tác giả</a>
+                                            </div>
+                                        </p>
+                                        <p>Sau khi soạn TKB, dán danh sách lớp (ví dụ: <code>CS406.Q12.1,SE357.Q11.1,CS406.Q12,SE357.Q11</code>) vào ô dưới để sinh script.</p>
+                                    </div>
+
+                                    <label for="dkhp-input" class="field-label">Danh sách mã lớp (phân tách bằng dấu phẩy):</label>
+                                    <textarea id="dkhp-input" class="dkhp-input" rows="3" placeholder="CS406.Q12.1,SE357.Q11.1,CS406.Q12,SE357.Q11"></textarea>
+
+                                    <div class="dkhp-actions">
+                                        <button id="dkhp-generate-btn" class="btn primary"><i class="fas fa-code"></i> Tạo script</button>
+                                        <button id="dkhp-copy-btn" class="btn"><i class="fas fa-copy"></i> Copy script</button>
+                                    </div>
+
+                                    <label for="dkhp-output" class="field-label">Script sinh ra (dán vào Console trang ĐKHP của trường):</label>
+                                    <textarea id="dkhp-output" class="dkhp-output" rows="10" readonly></textarea>
+
+                                    <details class="dkhp-notes">
+                                        <summary>Script này cải tiến gì so với bản cơ bản?</summary>
+                                        <ul>
+                                            <li>Chờ DOM động với <code>MutationObserver</code> (đỡ lỗi chưa load xong).</li>
+                                            <li>Chọn lớp theo mã chính xác ở cột thứ 2, click checkbox an toàn.</li>
+                                            <li>Hỗ trợ nhiều selector nút nộp/đăng ký để tương thích UI khác nhau.</li>
+                                            <li>Log rõ ràng màu sắc trên Console, dễ theo dõi.</li>
+                                        </ul>
+                                    </details>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Assignments Section -->
+                <section id="assignments-section" class="content-section hidden">
+                    <div class="assignments-page-head">
+                        <h2>Quản lý bài tập</h2>
+                        <div class="assignments-toolbar">
+                            <select id="semester-filter" aria-label="Học kỳ">
+                                <option value="">Tất cả học kỳ</option>
+                            </select>
+                            <select id="course-filter" aria-label="Môn học">
+                                <option value="">Tất cả môn học</option>
+                            </select>
+                            <select id="status-filter" aria-label="Trạng thái">
+                                <option value="">Tất cả trạng thái</option>
+                                <option value="submitted">Đã nộp</option>
+                                <option value="draft">Chưa nộp</option>
+                                <option value="late">Nộp muộn</option>
+                                <option value="group">Bài tập nhóm</option>
+                            </select>
+                            <select id="sort-order" class="form-control" aria-label="Sắp xếp">
+                                <option value="closest">Sắp xếp: Sắp hạn nhất</option>
+                                <option value="farthest">Sắp xếp: Xa hạn nhất</option>
+                                <option value="newest">Sắp xếp: Giao mới nhất</option>
+                                <option value="oldest">Sắp xếp: Giao cũ nhất</option>
+                            </select>
+                            <button type="button" id="assignments-refresh-btn" class="btn btn-primary btn-small">Làm mới</button>
+                        </div>
+                    </div>
+                    
+                    <div id="assignments-list" class="assignments-list">
+                        <div class="loading-placeholder">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <p>Đang tải danh sách bài tập...</p>
+                        </div>
+                    </div>
+
+                </section>
+
+                <!-- Custom Deadlines (Make Deadline) Section -->
+                <section id="custom-deadlines-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Deadline thủ công</h2>
+                        <div class="section-actions">
+                            <button id="cd-open-modal" class="btn btn-primary btn-small"><i class="fas fa-plus"></i> Thêm deadline</button>
+                        </div>
+                    </div>
+                    <div class="custom-deadline-list-card" style="margin-top:8px;">
+                        <div class="decor-glow" id="cd-decor-glow"></div>
+                        <div class="list-header">
+                            <h3><i class="fas fa-list"></i> Danh sách deadline</h3>
+                            <div class="list-filters">
+                                <input type="text" id="cd-search" placeholder="Tìm kiếm deadline..." />
+                                <select id="cd-filter-status">
+                                    <option value="">Lọc: Tất cả</option>
+                                    <option value="active">Chưa hoàn thành</option>
+                                    <option value="completed">Đã hoàn thành</option>
+                                    <option value="overdue">Quá hạn</option>
+                                </select>
+                                <select id="cd-sort-order">
+                                    <option value="closest">Sắp xếp: Gần nhất</option>
+                                    <option value="farthest">Sắp xếp: Xa nhất</option>
+                                    <option value="title">Sắp xếp: Tiêu đề</option>
+                                    <option value="created">Sắp xếp: Mới tạo</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="cd-tag-filters" class="cd-tag-filters" style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px 4px;"></div>
+                        <div id="custom-deadlines-list" class="custom-deadlines-list empty">
+                            <p class="empty-text">Chưa có deadline nào.</p>
+                        </div>
+                    </div>
+                </section>
+
+
+                <!-- Courses Section -->
+                <section id="courses-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Khóa học</h2>
+                        <div class="section-actions">
+                            <div class="filter-controls">
+                                <select id="semester-filter-courses" class="form-control">
+                                    <option value="">Tất cả học kỳ</option>
+                                </select>
+                                <label style="display:flex;align-items:center;gap:8px;margin-left:12px;">
+                                    <input type="checkbox" id="toggle-general-courses" checked />
+                                    <span>Hiển thị Khóa học chung</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Course Categories -->
+                    <div class="course-categories">
+                        <!-- General Courses -->
+                        <div class="course-category" id="general-courses">
+                            <div class="category-header">
+                                <h3><i class="fas fa-globe"></i> Khóa học chung</h3>
+                                <span class="course-count" id="general-count">0</span>
+                            </div>
+                            <div class="courses-grid" id="general-courses-list">
+                                <!-- General courses will be populated here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Semester Courses -->
+                        <div class="course-category" id="semester-courses">
+                            <div class="category-header">
+                                <h3><i class="fas fa-calendar-alt"></i> Khóa học theo kỳ</h3>
+                                <span class="course-count" id="semester-count">0</span>
+                            </div>
+                            <div class="courses-grid" id="semester-courses-list">
+                                <!-- Semester courses will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Settings Section -->
+                <section id="settings-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Cài đặt</h2>
+                    </div>
+                    
+                    <div class="settings-content">
+                        <div class="settings-card">
+                            <h3>Tài khoản</h3>
+                            <div class="setting-item">
+                                <label>Mã số sinh viên hiện tại:</label>
+                                <span id="current-student-id">-</span>
+                            </div>
+                            <div class="setting-item">
+                                <label>Tên người dùng:</label>
+                                <span id="current-username">-</span>
+                            </div>
+                                <div class="setting-item">
+                                    <input type="checkbox" id="minimize-to-tray" />
+                                    <label for="minimize-to-tray">Thu nhỏ xuống khay khi đóng</label>
+                                </div>
+                                <div class="setting-item">
+                                    <input type="checkbox" id="auto-start-windows" />
+                                    <label for="auto-start-windows">Khởi động cùng Windows</label>
+                                </div>
+                            <button id="change-account-btn" class="btn btn-outline">
+                                <i class="fas fa-exchange-alt"></i>
+                                Đổi tài khoản
+                            </button>
+                        </div>
+
+                        <div class="settings-card">
+                            <h3>Cổng sinh viên</h3>
+                            <div class="setting-item">
+                                <label>Kết nối STC</label>
+                                <button id="open-stc-profile-settings" class="btn btn-outline btn-small">Mở hồ sơ</button>
+                            </div>
+                            <div class="setting-item">
+                                <label>Tự làm mới</label>
+                                <input type="checkbox" id="stc-auto-refresh-enabled" />
+                            </div>
+                            <div class="setting-item">
+                                <label>Chu kỳ làm mới (phút)</label>
+                                <input type="number" id="stc-auto-refresh-minutes" min="5" max="180" value="15" style="width:80px" />
+                            </div>
+                        </div>
+                        
+                        <div class="settings-card">
+                            <h3>Ứng dụng</h3>
+                            <div class="setting-item">
+                                <label>Giao diện</label>
+                                <button id="settings-theme-toggle" class="btn btn-outline btn-small" title="Đổi Dark/Light">
+                                    <i class="fas fa-adjust"></i> Đổi Dark/Light
+                                </button>
+                            </div>
+                            <div class="setting-item">
+                                <label>Base URL Moodle</label>
+                                <input type="text" id="base-url-input" placeholder="https://courses.uit.edu.vn" style="width:60%" />
+                            </div>
+                            <div class="setting-item">
+                                <label>Số ngày deadline gấp</label>
+                                <input type="number" id="urgent-days-threshold" min="1" max="14" value="3" style="width:80px" />
+                            </div>
+                            <div class="setting-item">
+                                <label>Phiên bản:</label>
+                                <span id="app-version">-</span>
+                            </div>
+                            <div class="setting-item">
+                                <label>Cập nhật ứng dụng</label>
+                                <div>
+                                    <button id="check-update-btn" class="btn btn-primary btn-small">
+                                        <i class="fas fa-sync-alt"></i>
+                                        Kiểm tra cập nhật
+                                    </button>
+                                    <button id="restart-update-btn" class="btn btn-outline btn-small" style="display:none;">
+                                        <i class="fas fa-download"></i>
+                                        Khởi động lại để cập nhật
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="setting-item" id="update-progress-row" style="display:none;align-items:center;gap:12px;">
+                                <label>Tiến trình tải</label>
+                                <div class="progress" style="width:260px;height:10px;background:var(--bg-tertiary);border-radius:6px;overflow:hidden;">
+                                    <div id="update-progress-bar" style="height:100%;width:0;background:linear-gradient(90deg,var(--uit-blue),var(--uit-accent));transition:width .2s;"></div>
+                                </div>
+                                <span id="update-progress-text" class="text-muted">0%</span>
+                            </div>
+                            <div class="setting-item">
+                                <label>Phát triển bởi:</label>
+                                <span>Hy</span>
+                            </div>
+                        <div class="setting-item">
+                            <label>Bật thông báo tự động</label>
+                            <input type="checkbox" id="enable-notifications" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Chu kỳ kiểm tra (phút)</label>
+                            <input type="number" id="polling-interval" min="1" max="60" value="5" style="width:80px" />
+                        </div>
+                    </div>
+                    
+                    <div class="settings-card">
+                        <h3>Thông báo</h3>
+                        <div class="setting-item">
+                            <label>Bỏ qua mục cũ quá (ngày)</label>
+                            <input type="number" id="ignore-old-days" min="1" max="60" value="7" style="width:80px" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Bật thông báo Windows Toast</label>
+                            <input type="checkbox" id="enable-toast-notifications" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Bật thông báo trong ứng dụng</label>
+                            <input type="checkbox" id="enable-in-app-notifications" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Bật âm thanh thông báo</label>
+                            <input type="checkbox" id="enable-notification-sound" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Chu kỳ kiểm tra thông báo (phút)</label>
+                            <input type="number" id="notification-check-interval" min="1" max="60" value="5" style="width:80px" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Thông báo bài tập mới</label>
+                            <input type="checkbox" id="notify-new-assignments" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Thông báo nội dung mới</label>
+                            <input type="checkbox" id="notify-new-content" />
+                        </div>
+                        <div class="setting-item">
+                            <label>Thông báo deadline sắp tới</label>
+                            <input type="checkbox" id="notify-upcoming-deadlines" />
+                        </div>
+                        <div class="setting-actions">
+                            <button id="test-notification-btn" class="btn btn-outline btn-small">
+                                <i class="fas fa-bell"></i>
+                                Test thông báo
+                            </button>
+                            <button id="clear-notification-history-btn" class="btn btn-outline btn-small">
+                                <i class="fas fa-trash"></i>
+                                Xóa lịch sử
+                            </button>
+                        </div>
+                    </div>
+                    </div>
+                </section>
+                <!-- Assignment Details Section -->
+                <section id="assignment-details-section" class="content-section hidden">
+                    <div id="assignment-details-content">
+                        <!-- Assignment details content will be loaded here -->
+                    </div>
+                </section>
+
+                <!-- Course Details Section -->
+                <section id="course-details-section" class="content-section hidden">
+                    <div id="course-details-content">
+                        <!-- Course details content will be loaded here -->
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Notification Container -->
+    <div id="notification-container" class="notification-container"></div>
+
+    <div id="stc-profile-modal" class="modal hidden">
+        <div class="modal-content stc-profile-modal-content">
+            <div class="modal-header">
+                <h3>Hồ sơ & Kết nối cổng sinh viên</h3>
+                <button type="button" class="modal-close" id="stc-profile-close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="stc-profile-grid">
+                    <div class="stc-profile-card stc-profile-card--info">
+                        <div class="stc-profile-title">Thông tin cá nhân</div>
+                        <p class="stc-profile-lead">Dữ liệu từ Moodle (đăng nhập app) và cổng STC khi đã đồng bộ.</p>
+                        <div class="stc-profile-row">
+                            <div class="stc-profile-label">Tên</div>
+                            <div class="stc-profile-value" id="stc-profile-name">-</div>
+                        </div>
+                        <div class="stc-profile-row">
+                            <div class="stc-profile-label">MSSV (Moodle)</div>
+                            <div class="stc-profile-value" id="stc-profile-studentid">-</div>
+                        </div>
+                        <div id="stc-profile-extra" class="stc-profile-extra"></div>
+                    </div>
+                    <div class="stc-profile-card">
+                        <div class="stc-profile-title">Đăng nhập STC (local)</div>
+                        <div class="form-group">
+                            <label for="stc-profile-sid">MSSV</label>
+                            <input type="text" id="stc-profile-sid" placeholder="Nhập MSSV">
+                        </div>
+                        <div class="form-group">
+                            <label for="stc-profile-pass">Mật khẩu</label>
+                            <input type="password" id="stc-profile-pass" placeholder="Nhập mật khẩu">
+                        </div>
+                        <label class="stc-remember" style="margin: 6px 0 10px;">
+                            <input type="checkbox" id="stc-profile-remember">
+                            <span>Lưu local (dùng cho điểm, lịch nghỉ/bù, TKB API, và auto-login course)</span>
+                        </label>
+                        <div class="stc-profile-actions">
+                            <button id="stc-profile-login" class="btn btn-primary btn-small">Đăng nhập</button>
+                            <button id="stc-profile-clear" class="btn btn-outline btn-small">Xóa lưu</button>
+                        </div>
+                        <div class="stc-auth-meta" id="stc-profile-meta"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Large Custom Deadline Modal -->
+    <div id="custom-deadline-modal" class="modal hidden large-modal">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h3 id="custom-deadline-modal-title">Thêm deadline thủ công</h3>
+                <button class="modal-close" id="close-custom-deadline-modal"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-tabs" role="tablist">
+                    <button type="button" class="modal-tab active" data-tab="overview">Sơ bộ</button>
+                    <button type="button" class="modal-tab" data-tab="details">Chi tiết</button>
+                    <button type="button" class="modal-tab" data-tab="labels">Nhãn & Nhắc</button>
+                </div>
+                <div class="modal-steps" aria-hidden="true">
+                    <div class="track"><div class="bar" id="cd-steps-bar" style="width:33%;"></div></div>
+                </div>
+                <form id="custom-deadline-form" autocomplete="off">
+                    <div class="modal-pane active" data-pane="overview">
+                        <div class="form-section" data-section="type">
+                            <h4 class="section-title"><i class="fas fa-tag"></i> Loại deadline</h4>
+                            <div class="type-selector">
+                                <label class="type-option">
+                                    <input type="radio" name="deadline-type" value="assignment" checked />
+                                    <div class="type-card">
+                                        <i class="fas fa-tasks"></i>
+                                        <span>Bài tập</span>
+                                    </div>
+                                </label>
+                                <label class="type-option">
+                                    <input type="radio" name="deadline-type" value="meeting" />
+                                    <div class="type-card">
+                                        <i class="fas fa-users"></i>
+                                        <span>Buổi họp</span>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="section-divider"></div>
+                        <div class="form-section" data-section="general">
+                            <h4 class="section-title"><i class="fas fa-info-circle"></i> Thông tin chung</h4>
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="cd-title">Tiêu đề <span class="req">*</span></label>
+                                    <input type="text" id="cd-title" maxlength="200" placeholder="Ví dụ: Ôn tập giữa kỳ" />
+                                </div>
+                                <div class="form-group">
+                                    <label for="cd-course-inline">Môn học (học kỳ hiện tại)</label>
+                                    <select id="cd-course-inline">
+                                        <option value="">-- Chọn (tùy chọn) --</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="section-divider"></div>
+                        <div class="form-section" data-section="scheduling">
+                            <h4 class="section-title"><i class="fas fa-clock"></i> Lịch</h4>
+                            <div class="form-grid">
+                                <div class="form-group full">
+                                    <label>Deadline <span class="req">*</span></label>
+                                    <div class="datetime-split">
+                                        <div class="date-time-row">
+                                            <div class="form-group">
+                                                <label for="cd-date">Ngày</label>
+                                                <input type="date" id="cd-date" />
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="cd-time">Thời gian</label>
+                                                <input type="time" id="cd-time" />
+                                            </div>
+                                        </div>
+                                        <div class="datetime-preview" id="cd-due-preview">
+                                            <span class="dp-weekday" id="cd-due-weekday">--</span>
+                                            <span class="dp-relative" id="cd-due-relative"></span>
+                                        </div>
+                                        <div class="quick-presets" id="cd-quick-presets">
+                                            <button type="button" data-preset="today-eod" class="qp-btn">Hôm nay 23:59</button>
+                                            <button type="button" data-preset="tomorrow-eod" class="qp-btn">Ngày mai 23:59</button>
+                                            <button type="button" data-preset="plus3" class="qp-btn">+3 ngày</button>
+                                            <button type="button" data-preset="nextweek" class="qp-btn">Tuần sau</button>
+                                            <button type="button" data-preset="plus1w" class="qp-btn">+1 tuần</button>
+                                            <button type="button" data-preset="endmonth" class="qp-btn">Cuối tháng</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-pane" data-pane="details">
+                        <div class="form-section" data-section="content">
+                            <h4 class="section-title"><i class="fas fa-align-left"></i> Nội dung</h4>
+                            <div class="form-grid">
+                                <div class="form-group full">
+                                    <label for="cd-desc">Mô tả / Ghi chú</label>
+                                    <textarea id="cd-desc" rows="8" maxlength="2000" placeholder="Ghi chú chi tiết về deadline..."></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-pane" data-pane="labels">
+                        <div class="form-section" data-section="labels">
+                            <h4 class="section-title"><i class="fas fa-tags"></i> Nhãn</h4>
+                            <div class="form-grid">
+                                <div class="form-row-split full">
+                                    <div class="form-group">
+                                        <label for="cd-color">Màu</label>
+                                        <input type="color" id="cd-color" value="#06b6d4" />
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cd-tags">Tags (phân tách bằng dấu phẩy)</label>
+                                        <input type="text" id="cd-tags" placeholder="ví dụ: ôn tập, nhóm 3" maxlength="200" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="section-divider"></div>
+                        <div class="form-section" data-section="reminder">
+                            <h4 class="section-title"><i class="fas fa-bell"></i> Nhắc trước</h4>
+                            <div class="form-grid">
+                                <div class="form-group" style="max-width:280px;">
+                                    <label for="cd-reminder">Thời gian nhắc</label>
+                                    <select id="cd-reminder">
+                                        <option value="">-- Không --</option>
+                                        <option value="5">5 phút</option>
+                                        <option value="10">10 phút</option>
+                                        <option value="30">30 phút</option>
+                                        <option value="60">1 giờ</option>
+                                        <option value="120">2 giờ</option>
+                                        <option value="360">6 giờ</option>
+                                        <option value="720">12 giờ</option>
+                                        <option value="1440">1 ngày</option>
+                                        <option value="2880">2 ngày</option>
+                                    </select>
+                                </div>
+                                <div class="form-hint" style="font-size:0.7rem;color:var(--text-muted);align-self:center;">Chỉ nhắc một lần trong khoảng trước deadline.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="cd-error" class="form-error" style="display:none"></div>
+                    <div class="modal-actions end">
+                        <button type="button" id="cd-next" class="btn btn-accent"><i class="fas fa-arrow-right"></i> Tiếp theo</button>
+                        <button type="submit" id="cd-save" class="btn btn-primary"><i class="fas fa-save"></i> Lưu</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Assignment Details Modal -->
+    <div id="assignment-details-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="assignment-details-title">Chi tiết bài tập</h3>
+                <button class="modal-close" onclick="closeAssignmentDetails()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="assignment-details-content">
+                    <!-- Assignment Info -->
+                    <div class="details-section">
+                        <h4>Thông tin bài tập</h4>
+                        <div class="assignment-info-grid">
+                            <div class="info-item">
+                                <label>Tên bài tập:</label>
+                                <span id="details-assignment-name"></span>
+                            </div>
+                            <div class="info-item">
+                                <label>Môn học:</label>
+                                <span id="details-course-name"></span>
+                            </div>
+                            <div class="info-item">
+                                <label>Deadline:</label>
+                                <span id="details-deadline"></span>
+                            </div>
+                            <div class="info-item">
+                                <label>Trạng thái:</label>
+                                <span id="details-status"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Priority Setting -->
+                    <div class="details-section">
+                        <h4>Mức độ ưu tiên</h4>
+                        <div class="priority-selector">
+                            <label class="priority-option">
+                                <input type="radio" name="priority" value="low" onchange="setAssignmentPriority(this.value)">
+                                <span class="priority-badge priority-low">
+                                    <i class="fas fa-arrow-down"></i>
+                                    Thấp
+                                </span>
+                            </label>
+                            <label class="priority-option">
+                                <input type="radio" name="priority" value="medium" onchange="setAssignmentPriority(this.value)">
+                                <span class="priority-badge priority-medium">
+                                    <i class="fas fa-minus"></i>
+                                    Trung bình
+                                </span>
+                            </label>
+                            <label class="priority-option">
+                                <input type="radio" name="priority" value="high" onchange="setAssignmentPriority(this.value)">
+                                <span class="priority-badge priority-high">
+                                    <i class="fas fa-arrow-up"></i>
+                                    Cao
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Personal Notes -->
+                    <div class="details-section">
+                        <h4>Ghi chú cá nhân</h4>
+                        <textarea id="assignment-notes" placeholder="Thêm ghi chú cá nhân cho bài tập này..." 
+                                  onchange="saveAssignmentNotes(this.value)"></textarea>
+                    </div>
+
+                    <!-- Subtasks -->
+                    <div class="details-section">
+                        <h4>Danh sách công việc</h4>
+                        <div class="subtasks-container">
+                            <div class="add-subtask">
+                                <input type="text" id="new-subtask-input" placeholder="Thêm công việc mới..." 
+                                       onkeypress="handleSubtaskKeypress(event)">
+                                <button class="btn btn-primary btn-small" onclick="addSubtask()">
+                                    <i class="fas fa-plus"></i>
+                                    Thêm
+                                </button>
+                            </div>
+                            <div id="subtasks-list" class="subtasks-list">
+                                <!-- Subtasks will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Reminder Setting -->
+                    <div class="details-section">
+                        <h4>Nhắc nhở</h4>
+                        <div class="reminder-setting">
+                            <label>
+                                <input type="checkbox" id="enable-reminder" onchange="toggleReminder(this.checked)">
+                                Bật nhắc nhở
+                            </label>
+                            <div id="reminder-options" class="reminder-options hidden">
+                                <select id="reminder-time" onchange="updateReminderTime()">
+                                    <option value="1">1 giờ trước</option>
+                                    <option value="6">6 giờ trước</option>
+                                    <option value="24">1 ngày trước</option>
+                                    <option value="72">3 ngày trước</option>
+                                    <option value="168">1 tuần trước</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeAssignmentDetails()">Đóng</button>
+                <button class="btn btn-primary" onclick="openAssignment(currentAssignmentId)">
+                    <i class="fas fa-external-link-alt"></i>
+                    Mở bài tập
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Removed Quick Notes & Quick Schedule Modals -->
+
+    <!-- AI Study Plan Modal -->
+    <div id="ai-study-plan-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-robot"></i> AI Study Plan - Lịch ôn tập thông minh</h3>
+                <button class="modal-close" onclick="closeAIStudyPlan()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="ai-study-plan-content">
+                    <div class="ai-loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <p>AI đang phân tích và tạo lịch ôn tập...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeAIStudyPlan()">Đóng</button>
+                <button class="btn btn-primary" onclick="refreshAIStudyPlan()">
+                    <i class="fas fa-sync-alt"></i>
+                    Làm mới
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar Day Picker Modal -->
+    <div id="calendar-day-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h3>Chọn bài tập</h3>
+                <button class="modal-close" onclick="closeCalendarDayPicker()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="calendar-day-body">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeCalendarDayPicker()">Đóng</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="delete-confirmation-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-exclamation-triangle" style="color: #ef4444; margin-right: 8px;"></i> Xác nhận xóa</h3>
+                <button class="modal-close" id="delete-modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p>Bạn có chắc chắn muốn xóa deadline này không?</p>
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 8px;">Hành động này không thể hoàn tác.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="delete-cancel">Hủy</button>
+                <button class="btn btn-danger" id="delete-confirm">Xóa</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
