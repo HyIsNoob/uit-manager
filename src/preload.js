@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Group assignments (user defined)
   getGroupAssignments: () => ipcRenderer.invoke('get-group-assignments'),
   setGroupAssignment: (assignmentId, isGroup) => ipcRenderer.invoke('set-group-assignment', assignmentId, isGroup),
+  getGroupSubmittedAssignments: () => ipcRenderer.invoke('get-group-submitted-assignments'),
+  setGroupSubmittedAssignment: (assignmentId, submitted) => ipcRenderer.invoke('set-group-submitted-assignment', assignmentId, submitted),
   // Assignments cache
   getAssignmentsCache: (userId, courseIds) => ipcRenderer.invoke('get-assignments-cache', userId, courseIds),
   setAssignmentsCache: (userId, courseId, data) => ipcRenderer.invoke('set-assignments-cache', userId, courseId, data),
@@ -51,6 +53,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   aiCacheSummary: (contentId, summary) => ipcRenderer.invoke('ai-cache-summary', contentId, summary),
   checkConnection: (token) => ipcRenderer.invoke('check-connection', token),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  openCourseInApp: (url) => ipcRenderer.invoke('open-course-in-app', url),
   // Auto update
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   quitAndInstall: () => ipcRenderer.invoke('quit-and-install'),
@@ -69,6 +72,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   importIcsFile: () => ipcRenderer.invoke('import-ics-file'),
   // Import Exam Schedule Excel
   importExamScheduleFile: () => ipcRenderer.invoke('import-exam-schedule-file'),
+
+  // STC API (apiservice.uit.edu.vn)
+  stcGetAuthState: () => ipcRenderer.invoke('stc-get-auth-state'),
+  stcSaveCredentials: (sid, password) => ipcRenderer.invoke('stc-save-credentials', sid, password),
+  stcClearCredentials: () => ipcRenderer.invoke('stc-clear-credentials'),
+  stcLogin: (sid, password, remember) => ipcRenderer.invoke('stc-login', sid, password, remember),
+  stcGetAll: (sid, opts) => ipcRenderer.invoke('stc-get-all', sid, opts),
+  stcGetCurrent: (sid, opts) => ipcRenderer.invoke('stc-get-current', sid, opts),
 
   // Word-backed Notes (RTF)
   ensureCourseNoteDoc: (courseId, courseName) => ipcRenderer.invoke('ensure-course-note-doc', courseId, courseName),

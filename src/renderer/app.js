@@ -1,3 +1,10 @@
+function shouldStcRefreshNow(settings) {
+    const enabled = Boolean(settings?.stcAutoRefreshEnabled);
+    if (!enabled) return false;
+    const mins = Math.max(5, Math.min(180, Number(settings?.stcAutoRefreshMinutes) || 15));
+    const last = Number(settings?.stcLastRefreshAt) || 0;
+    return !last || (Date.now() - last) >= mins * 60 * 1000;
+}
 // Global state
 const appState = {
     currentUser: null,
@@ -47,6 +54,14 @@ const appState = {
     examSchedule: [], // filtered exam schedule for enrolled courses
     examScheduleRaw: [], // raw data from Excel
     examScheduleFiltered: [], // currently displayed exams after filtering
+    stc: {
+        sid: '',
+        allData: null,
+        allTimestamp: null,
+        authState: null,
+    },
+    timetableSource: 'ics',
+    scheduleOverrides: [],
 };
 
 // DOM elements
@@ -103,6 +118,7 @@ const elements = {
     assignmentsList: document.getElementById('assignments-list'),
     toggleGroupBtn: document.getElementById('toggle-group-btn'),
     sortOrder: document.getElementById('sort-order'),
+    assignmentsRefreshBtn: document.getElementById('assignments-refresh-btn'),
     
     // Course elements
     coursesList: document.getElementById('courses-list'),
@@ -147,6 +163,7 @@ const elements = {
     // Timetable UI
     openTkbWeb: document.getElementById('open-tkb-web'),
     importIcsBtn: document.getElementById('import-ics-btn'),
+    timetableSource: document.getElementById('timetable-source'),
     ttPrevWeek: document.getElementById('tt-prev-week'),
     ttNextWeek: document.getElementById('tt-next-week'),
     ttWeekLabel: document.getElementById('tt-week-label'),
@@ -180,6 +197,44 @@ const elements = {
     ,examScheduleList: document.getElementById('exam-schedule-list')
     ,examScheduleEmpty: document.getElementById('exam-schedule-empty')
     ,examFilterDate: document.getElementById('exam-filter-date')
+
+    // STC UI - updates
+    ,stcRefreshUpdates: document.getElementById('stc-refresh-updates')
+    ,stcBannerUpdates: document.getElementById('stc-banner-updates')
+    ,stcOpenProfileUpdates: document.getElementById('stc-open-profile-updates')
+    ,scheduleUpdatesSearch: document.getElementById('schedule-updates-search')
+    ,scheduleUpdatesCourse: document.getElementById('schedule-updates-course')
+    ,scheduleUpdatesType: document.getElementById('schedule-updates-type')
+    ,scheduleUpdatesSort: document.getElementById('schedule-updates-sort')
+    ,scheduleUpdatesRange: document.getElementById('schedule-updates-range')
+    ,scheduleUpdatesList: document.getElementById('schedule-updates-list')
+
+    // STC UI - grades
+    ,stcRefreshGrades: document.getElementById('stc-refresh-grades')
+    ,stcBannerGrades: document.getElementById('stc-banner-grades')
+    ,stcOpenProfileGrades: document.getElementById('stc-open-profile-grades')
+    ,gradesSearch: document.getElementById('grades-search')
+    ,gradesSemester: document.getElementById('grades-semester')
+    ,gradesSort: document.getElementById('grades-sort')
+    ,gradesSummary: document.getElementById('grades-summary')
+    ,gradesContent: document.getElementById('grades-content')
+
+    // STC Profile modal
+    ,stcProfileModal: document.getElementById('stc-profile-modal')
+    ,stcProfileClose: document.getElementById('stc-profile-close')
+    ,stcProfileName: document.getElementById('stc-profile-name')
+    ,stcProfileStudentId: document.getElementById('stc-profile-studentid')
+    ,stcProfileSid: document.getElementById('stc-profile-sid')
+    ,stcProfilePass: document.getElementById('stc-profile-pass')
+    ,stcProfileRemember: document.getElementById('stc-profile-remember')
+    ,stcProfileLogin: document.getElementById('stc-profile-login')
+    ,stcProfileClear: document.getElementById('stc-profile-clear')
+    ,stcProfileMeta: document.getElementById('stc-profile-meta')
+
+    // STC settings
+    ,openStcProfileSettings: document.getElementById('open-stc-profile-settings')
+    ,stcAutoRefreshEnabled: document.getElementById('stc-auto-refresh-enabled')
+    ,stcAutoRefreshMinutes: document.getElementById('stc-auto-refresh-minutes')
 };
 // THEME
 async function applyThemeFromSettings() {
@@ -357,6 +412,7 @@ function formatDateShort(timestamp) {
 // Helpers for assignment status used in details rendering
 function getAssignmentStatus(assignment) {
     if (!assignment) return 'pending';
+    if (assignment.userMarkedGroupSubmitted) return 'submitted';
     if (assignment.isGroup) return 'group';
     if (assignment.isLate) return 'late';
     if (assignment.status === 'submitted' || assignment.isSubmitted) return 'submitted';
@@ -634,52 +690,48 @@ async function loadCategoriesForCourses() {
     
     appState.semesters = semesterIds.map(id => getCategory(id)).filter(Boolean);
     
-    // Sort semesters
     appState.semesters.sort((a, b) => {
         const pa = parseSemesterName(a.name);
         const pb = parseSemesterName(b.name);
-        
         const aParsed = (pa.y1 && pa.y2) ? 1 : 0;
         const bParsed = (pb.y1 && pb.y2) ? 1 : 0;
-        
         if (aParsed !== bParsed) return bParsed - aParsed;
-        
         if (aParsed) {
-            if (pa.y1 !== pb.y1) return pa.y1 - pb.y1;
-            if (pa.y2 !== pb.y2) return pa.y2 - pb.y2;
-            const sa = pa.sem ?? 99;
-            const sb = pb.sem ?? 99;
-            if (sa !== sb) return sa - sb;
+            if (pa.y1 !== pb.y1) return pb.y1 - pa.y1;
+            if (pa.y2 !== pb.y2) return pb.y2 - pa.y2;
+            const sa = pa.sem ?? 0;
+            const sb = pb.sem ?? 0;
+            if (sa !== sb) return sb - sa;
         }
-        
         return (a.name || '').localeCompare(b.name || '');
     });
 }
 
-async function loadAssignmentsForCourse(courseId) {
+async function loadAssignmentsForCourse(courseId, opts = {}) {
+    const force = Boolean(opts && opts.force);
     try {
         console.log(`Loading assignments for course ${courseId}`);
         const courseKey = String(courseId);
-        // 1) Memory cache (15 minutes TTL)
         const memCache = appState.assignmentsCache[courseKey];
-        if (memCache && Array.isArray(memCache.data) && (Date.now() - memCache.timestamp) < 15 * 60 * 1000) {
+        if (!force && memCache && Array.isArray(memCache.data) && (Date.now() - memCache.timestamp) < 15 * 60 * 1000) {
             console.log(`Using in-memory cache for course ${courseId}: ${memCache.data.length} items`);
             return memCache.data;
         }
 
-        // 2) Persistent cache (1 hour TTL)
-        try {
-            const cachedResp = await window.electronAPI.getAssignmentsCache(appState.siteInfo?.userid, [Number(courseId)]);
-            if (cachedResp && cachedResp.success) {
-                const entry = cachedResp.data && cachedResp.data[courseKey];
-                if (entry && Array.isArray(entry.data) && (Date.now() - entry.timestamp) < 60 * 60 * 1000) {
-                    console.log(`Using persistent cache for course ${courseId}: ${entry.data.length} items`);
-                    appState.assignmentsCache[courseKey] = { data: entry.data, timestamp: entry.timestamp };
-                    return entry.data;
+        if (!force) {
+            try {
+                const cachedResp = await window.electronAPI.getAssignmentsCache(appState.siteInfo?.userid, [Number(courseId)]);
+                if (cachedResp && cachedResp.success) {
+                    const entry = cachedResp.data && cachedResp.data[courseKey];
+                    if (entry && Array.isArray(entry.data) && (Date.now() - entry.timestamp) < 60 * 60 * 1000) {
+                        console.log(`Using persistent cache for course ${courseId}: ${entry.data.length} items`);
+                        appState.assignmentsCache[courseKey] = { data: entry.data, timestamp: entry.timestamp };
+                        return entry.data;
+                    }
                 }
+            } catch (e) {
+                console.warn('Failed to read assignments persistent cache:', e.message);
             }
-        } catch (e) {
-            console.warn('Failed to read assignments persistent cache:', e.message);
         }
 
         // 3) Fallback to API
@@ -903,6 +955,23 @@ function updateSmartDashboard() {
     
     // Update semester progress
     updateSemesterProgress();
+
+    const ctx = document.getElementById('dashboard-context-line');
+    if (ctx) {
+        const sem = appState.semesters && appState.semesters.length ? appState.semesters[0] : null;
+        const n = Array.isArray(appState.assignments) ? appState.assignments.length : 0;
+        ctx.textContent = sem
+            ? `Học kỳ mốc: ${sem.name} · ${n} bài tập đã tải`
+            : (n ? `${n} bài tập đã tải` : 'Chưa có dữ liệu bài tập');
+    }
+    const gpaEl = document.getElementById('dashboard-stc-gpa');
+    if (gpaEl) {
+        const scores = Array.isArray(appState.stc?.allData?.scores) ? appState.stc.allData.scores : [];
+        const snap = computeStcGradeSummaryChung(scores);
+        gpaEl.textContent = snap
+            ? `STC · TB tích lũy ~ ${snap.avgTichLuy !== null && snap.avgTichLuy !== undefined ? Number(snap.avgTichLuy).toFixed(2) : '—'} (${snap.creditsTichLuy} TC)`
+            : '';
+    }
 }
 
 function updateTodayFocus(stats) {
@@ -1203,7 +1272,8 @@ function isGroupAssignment(assignment) {
     }
 }
 
-async function updateAssignmentsList() {
+async function updateAssignmentsList(opts = {}) {
+    const force = Boolean(opts && opts.force);
     const semesterId = elements.semesterFilter.value;
     const courseId = elements.courseFilter.value;
     const status = elements.statusFilter.value;
@@ -1219,28 +1289,25 @@ async function updateAssignmentsList() {
         let assignments = [];
         
         if (courseId) {
-            // Load assignments for specific course
-            assignments = await loadAssignmentsForCourse(courseId);
+            assignments = await loadAssignmentsForCourse(courseId, { force });
         } else if (semesterId) {
-            // Load assignments for all courses in semester
             const semesterCourses = appState.courses.filter(c => 
                 appState.courseSemMap.get(c.id) === Number(semesterId)
             );
             
             for (const course of semesterCourses) {
-                const courseAssignments = await loadAssignmentsForCourse(course.id);
+                const courseAssignments = await loadAssignmentsForCourse(course.id, { force });
                 assignments.push(...courseAssignments);
             }
         } else {
-            // Load assignments for all courses
             for (const course of appState.courses) {
-                const courseAssignments = await loadAssignmentsForCourse(course.id);
+                const courseAssignments = await loadAssignmentsForCourse(course.id, { force });
                 assignments.push(...courseAssignments);
             }
         }
         
-        // Load user-marked group assignments map
         const userGroupMap = await window.electronAPI.getGroupAssignments();
+        const userGroupSubmittedMap = await window.electronAPI.getGroupSubmittedAssignments();
 
         // Load submission statuses
         const statuses = await mapWithConcurrency(assignments, 5, (assignment) => 
@@ -1250,13 +1317,11 @@ async function updateAssignmentsList() {
         // Process assignments with group detection
         let processedAssignments = assignments.map((assignment, idx) => {
             const userMark = userGroupMap[String(assignment.id)];
-            // User choice takes precedence over auto-detection
-            // If user has explicitly set it (true/false), use that; otherwise use auto-detection
             const isGroup = userMark !== undefined ? Boolean(userMark) : isGroupAssignment(assignment);
+            const userMarkedGroupSubmitted = Boolean(userGroupSubmittedMap[String(assignment.id)]);
             const submissionStatus = statuses[idx]?.lastattempt?.submission?.status || 'draft';
             const submission = statuses[idx]?.lastattempt?.submission || null;
             
-            // For group assignments, don't consider them "late" even if past due date
             const isLate = !isGroup && submissionStatus === 'submitted' && 
                           assignment.duedate && 
                           submission?.timemodified > assignment.duedate;
@@ -1264,6 +1329,7 @@ async function updateAssignmentsList() {
             return {
                 ...assignment,
                 isGroup,
+                userMarkedGroupSubmitted,
                 status: submissionStatus,
                 submission,
                 isLate
@@ -1286,6 +1352,9 @@ async function updateAssignmentsList() {
                 } else if (status === 'group') {
                     return assignment.isGroup;
                 }
+                if (status === 'submitted') {
+                    return assignment.status === 'submitted' || assignment.userMarkedGroupSubmitted;
+                }
                 return assignment.status === status;
             });
         }
@@ -1294,7 +1363,7 @@ async function updateAssignmentsList() {
         const nowTs = Date.now();
         const isPinned = (a) => appState.pinnedAssignments.has(String(a.id));
         const isExpired = (a) => a.duedate && (a.duedate * 1000) < nowTs;
-        const isSubmitted = (a) => a.status === 'submitted';
+        const isSubmitted = (a) => a.status === 'submitted' || a.userMarkedGroupSubmitted;
         
         filteredAssignments.sort((a, b) => {
             // Pinned first
@@ -1353,20 +1422,21 @@ async function updateAssignmentsList() {
             let statusText = 'Chưa nộp';
             let statusIcon = 'fas fa-clock';
             
-            if (assignment.isGroup) {
-                statusClass = 'group';
-                statusText = 'Bài tập nhóm';
-                statusIcon = 'fas fa-users';
-            } else if (assignment.status === 'submitted') {
-                if (assignment.isLate) {
+            const moodleSubmitted = assignment.status === 'submitted';
+            if (assignment.userMarkedGroupSubmitted || moodleSubmitted) {
+                if (assignment.isLate && !assignment.userMarkedGroupSubmitted) {
                     statusClass = 'late';
                     statusText = 'Nộp muộn';
                     statusIcon = 'fas fa-exclamation-triangle';
                 } else {
                     statusClass = 'submitted';
-                    statusText = 'Đã nộp';
+                    statusText = assignment.userMarkedGroupSubmitted && !moodleSubmitted ? 'Đã nộp (nhóm, tự xác nhận)' : 'Đã nộp';
                     statusIcon = 'fas fa-check-circle';
                 }
+            } else if (assignment.isGroup) {
+                statusClass = 'group';
+                statusText = 'Bài tập nhóm';
+                statusIcon = 'fas fa-users';
             }
             
             const course = appState.courses.find(c => (c.id === assignment.course) || (c.id === assignment.courseid));
@@ -1395,7 +1465,7 @@ async function updateAssignmentsList() {
                                 <input type="checkbox" class="pin-assignment-checkbox" ${pinned ? 'checked' : ''} />
                                 <i class="fas fa-thumbtack"></i>
                             </label>
-                            ${!assignment.isSubmitted ? `
+                            ${!(moodleSubmitted || assignment.userMarkedGroupSubmitted) ? `
                             <div class="countdown-chip" id="countdown-${assignment.id}">
                                 <i class="fas fa-clock"></i>
                                 <span class="countdown-text">-- ngày -- giờ -- phút</span>
@@ -1427,6 +1497,7 @@ async function updateAssignmentsList() {
                         </div>
                     </div>
                     <div class="assignment-actions">
+                        ${assignment.isGroup && !moodleSubmitted ? `<button type="button" class="btn btn-outline btn-small group-submitted-toggle" data-assign-id="${assignment.id}" data-marked="${assignment.userMarkedGroupSubmitted ? '1' : '0'}">${assignment.userMarkedGroupSubmitted ? 'Bỏ đánh dấu đã nộp (nhóm)' : 'Đánh dấu đã nộp (nhóm)'}</button>` : ''}
                         <button class="btn btn-outline btn-small" onclick="openAssignmentDetails('${assignment.id}')">
                             <i class="fas fa-cog"></i>
                             Chi tiết
@@ -1439,6 +1510,16 @@ async function updateAssignmentsList() {
                 </div>
             `;
         }).join('');
+        Array.from(document.querySelectorAll('.assignment-card .group-submitted-toggle')).forEach((btn) => {
+            btn.addEventListener('click', async (e) => {
+                const id = Number(btn.getAttribute('data-assign-id'));
+                const marked = btn.getAttribute('data-marked') === '1';
+                if (!Number.isFinite(id)) return;
+                await window.electronAPI.setGroupSubmittedAssignment(id, !marked);
+                showNotification(!marked ? 'Đã đánh dấu bài nhóm đã nộp' : 'Đã bỏ đánh dấu', 'success');
+                updateAssignmentsList();
+            });
+        });
         // Attach listeners for group checkboxes
         Array.from(document.querySelectorAll('.assignment-card .mark-group-checkbox')).forEach((cb) => {
             cb.addEventListener('change', async (e) => {
@@ -1472,7 +1553,7 @@ async function updateAssignmentsList() {
         
         // Initialize countdown timers for unsubmitted assignments
         filteredAssignments.forEach(assignment => {
-            if (!assignment.isSubmitted) {
+            if (!(assignment.status === 'submitted' || assignment.userMarkedGroupSubmitted)) {
                 initializeAssignmentCountdown(assignment.id, assignment.duedate);
             }
         });
@@ -2260,10 +2341,96 @@ function updateSettings() {
 }
 
 // Navigation functions
+function schedulePeriodStartMinute(periodNum) {
+    const map = {
+        1: 450, 2: 495, 3: 540, 4: 600, 5: 645,
+        6: 780, 7: 825, 8: 870, 9: 930, 10: 975,
+    };
+    const p = Number(periodNum);
+    return map[p] ?? null;
+}
+
+function scheduleItemStartDate(it) {
+    if (!(it?.date instanceof Date)) return null;
+    const d = new Date(it.date);
+    d.setHours(0, 0, 0, 0);
+    const periods = Array.isArray(it.periods) ? it.periods : [];
+    const p0 = periods.length ? Number(periods[0]) : 1;
+    const startMin = schedulePeriodStartMinute(p0) ?? 450;
+    d.setHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+    return d;
+}
+
+function scheduleItemStartMs(it) {
+    const d = scheduleItemStartDate(it);
+    return d ? d.getTime() : null;
+}
+
+function isScheduleItemPast(it) {
+    const ms = scheduleItemStartMs(it);
+    if (ms === null) return false;
+    return ms <= Date.now();
+}
+
+function notifyPostedMs(it) {
+    const raw = String(it.dated || '').trim();
+    if (!raw) return 0;
+    const t = Date.parse(raw.replace(' ', 'T'));
+    return Number.isFinite(t) ? t : 0;
+}
+
+function sortKeyEventMs(it) {
+    const ms = scheduleItemStartMs(it);
+    if (ms !== null) return ms;
+    if (it.date instanceof Date) return it.date.getTime();
+    return Number.POSITIVE_INFINITY;
+}
+
+function formatScheduleCountdown(targetMs) {
+    const now = Date.now();
+    const diff = targetMs - now;
+    if (diff <= 0) return { text: 'Đã qua', tone: 'muted' };
+    const sec = Math.floor(diff / 1000);
+    const days = Math.floor(sec / 86400);
+    const hours = Math.floor((sec % 86400) / 3600);
+    const mins = Math.floor((sec % 3600) / 60);
+    if (days > 0) return { text: `Còn ${days} ngày`, tone: days <= 1 ? 'soon' : 'calm' };
+    if (hours > 0) return { text: `Còn ${hours} giờ ${mins}p`, tone: hours < 3 ? 'soon' : 'calm' };
+    return { text: `Còn ${mins} phút`, tone: 'urgent' };
+}
+
+function formatScheduleItemDisplayTitle(it) {
+    const code = it.code ? String(it.code).trim() : '';
+    const t = String(it.title || '');
+    const m = /\(([^)]+)\)/.exec(t);
+    const name = m ? m[1].trim() : '';
+    if (code && name) return `${code} · ${name}`;
+    if (code) return code;
+    return t.replace(/^\[[^\]]+\]\s*/g, '').replace(/^-\s*/, '').trim() || 'Thông báo';
+}
+
+let scheduleUpdatesTickTimer = null;
+function ensureScheduleUpdatesCountdownTick() {
+    if (scheduleUpdatesTickTimer) clearInterval(scheduleUpdatesTickTimer);
+    scheduleUpdatesTickTimer = setInterval(() => {
+        const sec = document.getElementById('schedule-updates-section');
+        if (!sec || sec.classList.contains('hidden')) return;
+        renderScheduleUpdates();
+    }, 30000);
+}
+
+function stopScheduleUpdatesCountdownTick() {
+    if (scheduleUpdatesTickTimer) {
+        clearInterval(scheduleUpdatesTickTimer);
+        scheduleUpdatesTickTimer = null;
+    }
+}
+
 function showSection(sectionName) {
     // Hide all sections (including new ones)
     const allSections = document.querySelectorAll('.content-section');
     allSections.forEach(section => {
+        section.classList.remove('showing');
         section.classList.add('hidden');
     });
     
@@ -2271,7 +2438,9 @@ function showSection(sectionName) {
     const targetSection = document.getElementById(`${sectionName}-section`);
     if (targetSection) {
         targetSection.classList.remove('hidden');
-        console.log('Showing section:', sectionName);
+        requestAnimationFrame(() => {
+            targetSection.classList.add('showing');
+        });
     } else {
         console.error('Section not found:', `${sectionName}-section`);
     }
@@ -2285,13 +2454,47 @@ function showSection(sectionName) {
     if (activeNavItem) {
         activeNavItem.classList.add('active');
     }
-    
-    // actions in global header removed
+
+    if (sectionName === 'schedule-updates') {
+        ensureScheduleUpdatesCountdownTick();
+        renderScheduleUpdates();
+    } else {
+        stopScheduleUpdatesCountdownTick();
+    }
 }
 
 // Timetable: open external TKB
 async function initTimetableUI() {
     if (appState.timetableInited) return; // prevent double-binding
+    if (elements.timetableSource) {
+        try {
+            const savedSrc = await window.electronAPI.getSetting('timetable.source');
+            const src = savedSrc === 'api' ? 'api' : 'ics';
+            appState.timetableSource = src;
+            elements.timetableSource.value = src;
+        } catch {
+            appState.timetableSource = 'ics';
+        }
+        elements.timetableSource.addEventListener('change', async (e) => {
+            const v = e.target.value === 'api' ? 'api' : 'ics';
+            appState.timetableSource = v;
+            try { await window.electronAPI.setSetting('timetable.source', v); } catch {}
+            try {
+                if (v === 'api') {
+                    const data = await stcFetchAll({ force: false });
+                    appState.timetableEvents = buildTimetableEventsFromStcCourses(data?.courses);
+                    initWeek(new Date());
+                    renderTimetable();
+                } else {
+                    parseIcsToEvents();
+                    initWeek(new Date());
+                    renderTimetable();
+                }
+            } catch (err) {
+                showNotification(err.message || 'Không thể đổi nguồn TKB', 'error');
+            }
+        });
+    }
     if (elements.openTkbWeb) {
         elements.openTkbWeb.onclick = () => window.electronAPI.openExternal('https://student.uit.edu.vn/sinhvien/tkb');
     }
@@ -2315,7 +2518,7 @@ async function initTimetableUI() {
     // Load stored ICS
     try {
         const saved = await window.electronAPI.getSetting('timetable.ics');
-        if (typeof saved === 'string' && saved.trim()) {
+        if (appState.timetableSource !== 'api' && typeof saved === 'string' && saved.trim()) {
             appState.icsRaw = saved;
             parseIcsToEvents();
             initWeek(new Date());
@@ -2323,7 +2526,841 @@ async function initTimetableUI() {
             if (elements.timetableGuide) elements.timetableGuide.classList.add('hidden');
         }
     } catch {}
+    if (appState.timetableSource === 'api') {
+        try {
+            const data = await stcFetchAll({ force: false });
+            appState.timetableEvents = buildTimetableEventsFromStcCourses(data?.courses);
+            initWeek(new Date());
+            renderTimetable();
+            if (elements.timetableGuide) elements.timetableGuide.classList.add('hidden');
+        } catch {}
+    }
     appState.timetableInited = true;
+}
+
+function parseApiTietToPeriods(rawTiet) {
+    const s = String(rawTiet || '').trim();
+    if (!s) return [];
+    const out = [];
+    let i = 0;
+    while (i < s.length) {
+        if (s[i] === '1' && s[i + 1] === '0') {
+            out.push(10);
+            i += 2;
+            continue;
+        }
+        if (s[i] === '0') {
+            out.push(10);
+            i += 1;
+            continue;
+        }
+        const n = parseInt(s[i], 10);
+        if (Number.isFinite(n) && n >= 1 && n <= 9) out.push(n);
+        i += 1;
+    }
+    return Array.from(new Set(out)).sort((a, b) => a - b);
+}
+
+function buildTimetableEventsFromStcCourses(coursesBlocks) {
+    const blocks = Array.isArray(coursesBlocks) ? coursesBlocks : [];
+    const events = [];
+    const baseTermStart = new Date(2000, 0, 1);
+    baseTermStart.setHours(0, 0, 0, 0);
+    blocks.forEach(b => {
+        const list = Array.isArray(b?.course) ? b.course : [];
+        list.forEach(c => {
+            const thuNum = parseInt(c?.thu, 10);
+            const jsDow = Number.isFinite(thuNum) ? Math.max(2, Math.min(7, thuNum)) - 1 : null;
+            const periods = parseApiTietToPeriods(c?.tiet);
+            if (!jsDow || !periods.length) return;
+            const code = String(c?.malop || '').trim().toUpperCase();
+            const loc = String(c?.phonghoc || '').trim().replace(/^P\./i, '').trim();
+            events.push({
+                dow: jsDow,
+                startMin: 0,
+                endMin: 0,
+                title: code || 'Môn học',
+                location: loc,
+                single: false,
+                termStart: baseTermStart,
+                until: null,
+                interval: 1,
+                periods,
+                code,
+                instructor: '',
+                source: 'api',
+            });
+        });
+    });
+    return events;
+}
+
+function formatStcAuthMeta(authState) {
+    if (!authState) return '';
+    const sid = authState.sid ? `MSSV: ${authState.sid}` : '';
+    const expiresAt = authState.expiresAt ? new Date(authState.expiresAt) : null;
+    const expiresText = expiresAt ? expiresAt.toLocaleString('vi-VN') : '';
+    const hasPassword = authState.hasPassword ? 'Đã lưu mật khẩu local' : 'Chưa lưu mật khẩu';
+    const tokenState = expiresAt
+        ? (Date.now() < expiresAt.getTime() ? 'Token còn hạn' : 'Token hết hạn')
+        : (authState.hasToken ? 'Token còn hạn' : 'Chưa có token');
+
+    const chip = (label, tone) => `<span class="stc-chip ${tone || ''}">${escapeHtml(label)}</span>`;
+    const parts = [];
+    if (sid) parts.push(chip(sid, ''));
+    parts.push(chip(tokenState + (expiresText ? `: ${expiresText}` : ''), tokenState.includes('hết hạn') ? 'danger' : (tokenState.includes('còn hạn') ? 'success' : '')));
+    parts.push(chip(hasPassword, authState.hasPassword ? 'info' : ''));
+    return `<div class="stc-meta-row">${parts.join('')}</div>`;
+}
+
+async function loadStcAuthStateIntoForms() {
+    try {
+        const resp = await window.electronAPI.stcGetAuthState();
+        if (!resp?.success) return;
+        appState.stc.authState = resp.data;
+        const sid = String(resp.data?.sid || '');
+        appState.stc.sid = sid;
+        const meta = formatStcAuthMeta(resp.data);
+        if (elements.stcBannerUpdates) elements.stcBannerUpdates.innerHTML = meta || '<span class="stc-chip">Chưa kết nối STC</span>';
+        if (elements.stcBannerGrades) elements.stcBannerGrades.innerHTML = meta || '<span class="stc-chip">Chưa kết nối STC</span>';
+        if (elements.stcProfileMeta) elements.stcProfileMeta.innerHTML = meta;
+        if (elements.stcProfileSid && !elements.stcProfileSid.value) elements.stcProfileSid.value = sid;
+
+        await loadStcCachedProfileIntoUI();
+    } catch {}
+}
+
+function normalizeStcProfilePayload(payload) {
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const pick = (...keys) => {
+        for (const k of keys) {
+            const v = p[k];
+            if (v !== undefined && v !== null && String(v).trim()) return String(v).trim();
+        }
+        return '';
+    };
+    const profile = {
+        fullName: pick('fullname', 'hoten', 'name', 'ten', 'hoTen'),
+        studentId: pick('mssv', 'sid', 'studentid', 'masv', 'username'),
+        className: pick('lop', 'class', 'classname', 'malop'),
+        major: pick('nganh', 'major'),
+        faculty: pick('khoa', 'faculty'),
+        department: pick('bomon', 'department'),
+        email: pick('email', 'mail'),
+    };
+    return profile;
+}
+
+function mergeStcProfile(rawA, rawB) {
+    const a = normalizeStcProfilePayload(rawA);
+    const b = normalizeStcProfilePayload(rawB);
+    return {
+        fullName: b.fullName || a.fullName,
+        studentId: b.studentId || a.studentId,
+        className: b.className || a.className,
+        major: b.major || a.major,
+        faculty: b.faculty || a.faculty,
+        department: b.department || a.department,
+        email: b.email || a.email,
+    };
+}
+
+function renderStcProfileExtra(profile, opts = {}) {
+    const rows = [];
+    const add = (label, value) => {
+        if (!value) return;
+        rows.push(
+            `<div class="stc-profile-row"><div class="stc-profile-label">${escapeHtml(label)}</div><div class="stc-profile-value">${escapeHtml(value)}</div></div>`
+        );
+    };
+    add('MSSV (STC)', opts.stcSid);
+    add('Lớp', profile.className);
+    add('Ngành', profile.major);
+    add('Khoa', profile.faculty);
+    add('Bộ môn', profile.department);
+    add('Email', profile.email);
+    return rows.join('');
+}
+
+function computeStcGradeSummaryChung(scores) {
+    try {
+        if (!Array.isArray(scores) || !scores.length) return null;
+        const allRows = scores.flatMap(b => Array.isArray(b?.score) ? b.score : []);
+        const isCountedForAvg = (r) => {
+            const tc = parseFloat(r?.sotc);
+            if (!Number.isFinite(tc) || tc <= 0) return false;
+            const g = parseFloat(r?.diem);
+            if (!Number.isFinite(g)) return false;
+            const d1 = parseFloat(r?.diem1);
+            const d2 = parseFloat(r?.diem2);
+            const d3 = parseFloat(r?.diem3);
+            const d4 = parseFloat(r?.diem4);
+            const hasComponent = [d1, d2, d3, d4].some(x => Number.isFinite(x));
+            if (g === 0 && !hasComponent) return false;
+            return true;
+        };
+        const isEnglishExemptRow = (r) => {
+            const tc = parseFloat(r?.sotc);
+            if (!Number.isFinite(tc) || tc <= 0) return false;
+            const g = parseFloat(r?.diem);
+            const d1 = parseFloat(r?.diem1);
+            const d2 = parseFloat(r?.diem2);
+            const d3 = parseFloat(r?.diem3);
+            const d4 = parseFloat(r?.diem4);
+            const hasComponent = [d1, d2, d3, d4].some(x => Number.isFinite(x));
+            if (!(g === 0 && !hasComponent)) return false;
+            const mamh = String(r?.mamh || '').trim().toUpperCase();
+            const tenmh = String(r?.tenmh || '').trim().toLowerCase();
+            return /^ENG\d+/i.test(mamh) || tenmh.includes('anh văn');
+        };
+        const normalizeCourseKey = (r) => String(r?.mamh || '').trim().toUpperCase();
+        const pickBestAttemptByCourse = (rows) => {
+            const by = new Map();
+            rows.forEach(r => {
+                const tc = parseFloat(r?.sotc);
+                if (!Number.isFinite(tc) || tc <= 0) return;
+                const g = parseFloat(r?.diem);
+                const eligible = Number.isFinite(g) || isEnglishExemptRow(r);
+                if (!eligible) return;
+                const key = normalizeCourseKey(r);
+                if (!key) return;
+                const current = by.get(key);
+                if (!current) {
+                    by.set(key, r);
+                    return;
+                }
+                const g0 = parseFloat(current?.diem);
+                const v = Number.isFinite(g) ? g : -Infinity;
+                const v0 = Number.isFinite(g0) ? g0 : -Infinity;
+                if (v > v0) by.set(key, r);
+            });
+            return Array.from(by.values());
+        };
+        const computeAvg = (rows) => {
+            let sum = 0;
+            let credits = 0;
+            rows.forEach(r => {
+                const tc = parseFloat(r?.sotc);
+                const g = parseFloat(r?.diem);
+                if (!isCountedForAvg(r)) return;
+                sum += g * tc;
+                credits += tc;
+            });
+            return credits > 0 ? { avg: sum / credits, credits } : { avg: null, credits: 0 };
+        };
+        const computeAccumulatedCredits = (rows) => {
+            let credits = 0;
+            rows.forEach(r => {
+                const tc = parseFloat(r?.sotc);
+                const g = parseFloat(r?.diem);
+                if (!Number.isFinite(tc) || tc <= 0) return;
+                const d1 = parseFloat(r?.diem1);
+                const d2 = parseFloat(r?.diem2);
+                const d3 = parseFloat(r?.diem3);
+                const d4 = parseFloat(r?.diem4);
+                const hasComponent = [d1, d2, d3, d4].some(x => Number.isFinite(x));
+                const mamh = String(r?.mamh || '').trim().toUpperCase();
+                const tenmh = String(r?.tenmh || '').trim().toLowerCase();
+                const isEnglishExempt = g === 0 && !hasComponent && (/^ENG\d+/i.test(mamh) || tenmh.includes('anh văn'));
+                if (Number.isFinite(g) && g >= 5) credits += tc;
+                else if (isEnglishExempt) credits += tc;
+            });
+            return credits;
+        };
+        const bestAttempts = pickBestAttemptByCourse(allRows);
+        const chungCreditsAccum = Math.round(computeAccumulatedCredits(bestAttempts));
+        const bestAttemptsPassed = bestAttempts.filter(r => {
+            const g = parseFloat(r?.diem);
+            return Number.isFinite(g) && g >= 5;
+        });
+        const chungTichLuy = computeAvg(bestAttemptsPassed);
+        if (chungCreditsAccum <= 0 && chungTichLuy.avg === null) return null;
+        return {
+            avgTichLuy: chungTichLuy.avg,
+            creditsTichLuy: chungCreditsAccum,
+            courseCount: bestAttempts.length,
+        };
+    } catch {
+        return null;
+    }
+}
+
+async function loadStcCachedProfileIntoUI() {
+    try {
+        const extra = document.getElementById('stc-profile-extra');
+        const cached = await window.electronAPI.getSetting('stc.profile');
+        let profile = normalizeStcProfilePayload(cached);
+        const rawAll = appState.stc?.allData;
+        if (rawAll && typeof rawAll === 'object') {
+            profile = mergeStcProfile(profile, rawAll);
+        }
+        const moodleName = (appState.currentUser?.fullname || '').trim()
+            || [appState.currentUser?.firstname, appState.currentUser?.lastname].filter(Boolean).join(' ').trim();
+        const moodleId = String(appState.currentStudentId || '').trim();
+        const stcSid = String(appState.stc?.sid || '').trim();
+        if (elements.stcProfileName) {
+            elements.stcProfileName.textContent = profile.fullName || moodleName || '-';
+        }
+        if (elements.stcProfileStudentId) {
+            elements.stcProfileStudentId.textContent = moodleId || '-';
+        }
+        const scores = Array.isArray(rawAll?.scores) ? rawAll.scores : [];
+        const gradeSnap = computeStcGradeSummaryChung(scores);
+        const avgTxt = gradeSnap && gradeSnap.avgTichLuy !== null && gradeSnap.avgTichLuy !== undefined
+            ? Number(gradeSnap.avgTichLuy).toFixed(2)
+            : '—';
+        const gradeRows = gradeSnap
+            ? `<div class="stc-profile-row"><div class="stc-profile-label">TB chung tích lũy</div><div class="stc-profile-value">${escapeHtml(avgTxt)} <span class="stc-subtle">(${gradeSnap.creditsTichLuy} TC tích lũy)</span></div></div><div class="stc-profile-note">Trùng «Điểm trung bình chung tích lũy» và «Số tín chỉ tích lũy» trên tab Điểm (môn đạt ≥ 5.0; tín chỉ gồm miễn Anh văn nếu có).</div>`
+            : '';
+        if (extra) extra.innerHTML = renderStcProfileExtra(profile, { stcSid }) + gradeRows;
+    } catch {}
+}
+
+async function fetchAndCacheStcProfile({ force = false } = {}) {
+    try {
+        const sid = String(appState.stc.sid || '').trim();
+        if (!sid) return;
+        const res = await window.electronAPI.stcGetCurrent(sid, { force: Boolean(force) });
+        if (!res?.success || !res.data) return;
+        const prev = await window.electronAPI.getSetting('stc.profile');
+        const merged = mergeStcProfile(prev, res.data);
+        await window.electronAPI.setSetting('stc.profile', merged);
+        await loadStcCachedProfileIntoUI();
+    } catch {}
+}
+
+async function stcLoginFromProfile() {
+    const sid = String(elements.stcProfileSid?.value || '').trim();
+    const pass = String(elements.stcProfilePass?.value || '');
+    const remember = Boolean(elements.stcProfileRemember?.checked);
+    const res = await window.electronAPI.stcLogin(sid, pass, remember);
+    if (!res?.success) {
+        showNotification(res?.error || 'Đăng nhập thất bại', 'error');
+        return false;
+    }
+    await loadStcAuthStateIntoForms();
+    await fetchAndCacheStcProfile({ force: true });
+    return true;
+}
+
+async function stcFetchAll({ force = false } = {}) {
+    const sid = String(appState.stc.sid || '').trim();
+    if (!sid) throw new Error('Chưa có MSSV');
+    const res = await window.electronAPI.stcGetAll(sid, { force, maxAgeMs: 10 * 60 * 1000 });
+    if (!res?.success) throw new Error(res?.error || 'Không lấy được dữ liệu');
+    appState.stc.sid = sid;
+    appState.stc.allData = res.data;
+    appState.stc.allTimestamp = res.timestamp || Date.now();
+    return res.data;
+}
+
+function hydrateStcDerivedData() {
+    try {
+        const data = appState.stc.allData;
+        if (!data) return;
+        if (Array.isArray(data.notify)) {
+            appState.scheduleOverrides = normalizeScheduleUpdatesFromNotify(data.notify);
+        }
+        populateScheduleUpdatesCourseFilter();
+    } catch {}
+}
+
+function escapeHtml(s) {
+    return String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function gradeFinalCellClass(raw) {
+    if (raw === null || raw === undefined || raw === '') return 'grade-cell-empty';
+    const g = parseFloat(String(raw).replace(',', '.'));
+    if (!Number.isFinite(g)) return 'grade-cell-empty';
+    if (g >= 8) return 'grade-cell-high';
+    if (g >= 5) return 'grade-cell-pass';
+    return 'grade-cell-low';
+}
+
+function renderGrades() {
+    if (!elements.gradesContent) return;
+    const data = appState.stc.allData;
+    const scores = Array.isArray(data?.scores) ? data.scores : [];
+    const q = String(elements.gradesSearch?.value || '').trim().toLowerCase();
+    const semesterFilter = String(elements.gradesSemester?.value || '').trim();
+    const sortMode = String(elements.gradesSort?.value || 'newest');
+
+    if (!scores.length) {
+        elements.gradesContent.innerHTML = '<div class="empty-state"><h3>Chưa có dữ liệu điểm</h3><p>Hãy đăng nhập và làm mới để tải điểm.</p></div>';
+        if (elements.gradesSummary) elements.gradesSummary.innerHTML = '';
+        if (elements.gradesSemester) elements.gradesSemester.innerHTML = '<option value="">Tất cả kỳ</option>';
+        return;
+    }
+
+    const parseBlockKey = (name) => {
+        const s = String(name || '');
+        const m = /HK\s*(\d+).*NH\s*(\d{4})\s*-\s*(\d{4})/i.exec(s);
+        if (!m) return { year: 0, semester: 0, label: s };
+        return { year: parseInt(m[2], 10) || 0, semester: parseInt(m[1], 10) || 0, label: s };
+    };
+
+    const blockInfos = scores.map(b => ({ ...parseBlockKey(b?.name), name: String(b?.name || '') }));
+    const uniqueLabels = Array.from(new Set(blockInfos.map(b => b.name))).filter(Boolean);
+    uniqueLabels.sort((a, b) => {
+        const ka = parseBlockKey(a);
+        const kb = parseBlockKey(b);
+        if (kb.year !== ka.year) return kb.year - ka.year;
+        return kb.semester - ka.semester;
+    });
+    if (elements.gradesSemester) {
+        const current = elements.gradesSemester.value;
+        elements.gradesSemester.innerHTML = ['<option value="">Tất cả kỳ</option>']
+            .concat(uniqueLabels.map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`))
+            .join('');
+        elements.gradesSemester.value = uniqueLabels.includes(current) ? current : semesterFilter;
+    }
+
+    const sortedScores = scores.slice().sort((a, b) => {
+        const ka = parseBlockKey(a?.name);
+        const kb = parseBlockKey(b?.name);
+        if (ka.year !== kb.year) return sortMode === 'oldest' ? ka.year - kb.year : kb.year - ka.year;
+        return sortMode === 'oldest' ? ka.semester - kb.semester : kb.semester - ka.semester;
+    });
+
+    const isCountedForAvg = (r) => {
+        const tc = parseFloat(r?.sotc);
+        if (!Number.isFinite(tc) || tc <= 0) return false;
+        const g = parseFloat(r?.diem);
+        if (!Number.isFinite(g)) return false;
+        const d1 = parseFloat(r?.diem1);
+        const d2 = parseFloat(r?.diem2);
+        const d3 = parseFloat(r?.diem3);
+        const d4 = parseFloat(r?.diem4);
+        const hasComponent = [d1, d2, d3, d4].some(x => Number.isFinite(x));
+        if (g === 0 && !hasComponent) return false;
+        return true;
+    };
+
+    const isEnglishExemptRow = (r) => {
+        const tc = parseFloat(r?.sotc);
+        if (!Number.isFinite(tc) || tc <= 0) return false;
+        const g = parseFloat(r?.diem);
+        const d1 = parseFloat(r?.diem1);
+        const d2 = parseFloat(r?.diem2);
+        const d3 = parseFloat(r?.diem3);
+        const d4 = parseFloat(r?.diem4);
+        const hasComponent = [d1, d2, d3, d4].some(x => Number.isFinite(x));
+        if (!(g === 0 && !hasComponent)) return false;
+        const mamh = String(r?.mamh || '').trim().toUpperCase();
+        const tenmh = String(r?.tenmh || '').trim().toLowerCase();
+        return /^ENG\d+/i.test(mamh) || tenmh.includes('anh văn');
+    };
+
+    const computeAvg = (rows) => {
+        let sum = 0;
+        let credits = 0;
+        rows.forEach(r => {
+            const tc = parseFloat(r?.sotc);
+            const g = parseFloat(r?.diem);
+            if (!isCountedForAvg(r)) return;
+            sum += g * tc;
+            credits += tc;
+        });
+        return credits > 0 ? { avg: sum / credits, credits } : { avg: null, credits: 0 };
+    };
+
+    const allRows = sortedScores.flatMap(b => Array.isArray(b?.score) ? b.score : []);
+
+    const normalizeCourseKey = (r) => String(r?.mamh || '').trim().toUpperCase();
+    const pickBestAttemptByCourse = (rows) => {
+        const by = new Map();
+        rows.forEach(r => {
+            const tc = parseFloat(r?.sotc);
+            if (!Number.isFinite(tc) || tc <= 0) return;
+            const g = parseFloat(r?.diem);
+            const eligible = Number.isFinite(g) || isEnglishExemptRow(r);
+            if (!eligible) return;
+            const key = normalizeCourseKey(r);
+            if (!key) return;
+            const current = by.get(key);
+            if (!current) {
+                by.set(key, r);
+                return;
+            }
+            const g0 = parseFloat(current?.diem);
+            const v = Number.isFinite(g) ? g : -Infinity;
+            const v0 = Number.isFinite(g0) ? g0 : -Infinity;
+            if (v > v0) by.set(key, r);
+        });
+        return Array.from(by.values());
+    };
+
+    const computeCredits = (rows) => {
+        let credits = 0;
+        rows.forEach(r => {
+            const tc = parseFloat(r?.sotc);
+            if (!Number.isFinite(tc) || tc <= 0) return;
+            const g = parseFloat(r?.diem);
+            if (Number.isFinite(g) || isEnglishExemptRow(r)) credits += tc;
+        });
+        return credits;
+    };
+
+    const computeAccumulatedCredits = (rows) => {
+        let credits = 0;
+        rows.forEach(r => {
+            const tc = parseFloat(r?.sotc);
+            const g = parseFloat(r?.diem);
+            if (!Number.isFinite(tc) || tc <= 0) return;
+            const d1 = parseFloat(r?.diem1);
+            const d2 = parseFloat(r?.diem2);
+            const d3 = parseFloat(r?.diem3);
+            const d4 = parseFloat(r?.diem4);
+            const hasComponent = [d1, d2, d3, d4].some(x => Number.isFinite(x));
+
+            const mamh = String(r?.mamh || '').trim().toUpperCase();
+            const tenmh = String(r?.tenmh || '').trim().toLowerCase();
+            const isEnglishExempt = g === 0 && !hasComponent && (/^ENG\d+/i.test(mamh) || tenmh.includes('anh văn'));
+
+            if (Number.isFinite(g) && g >= 5) credits += tc;
+            else if (isEnglishExempt) credits += tc;
+        });
+        return credits;
+    };
+
+    const bestAttempts = pickBestAttemptByCourse(allRows);
+    const chung = computeAvg(bestAttempts);
+    const chungCreditsLearned = computeCredits(bestAttempts);
+    const chungCreditsAccum = computeAccumulatedCredits(bestAttempts);
+
+    const bestAttemptsPassed = bestAttempts.filter(r => {
+        const g = parseFloat(r?.diem);
+        return Number.isFinite(g) && g >= 5;
+    });
+    const chungTichLuy = computeAvg(bestAttemptsPassed);
+
+    let semAvg = null;
+    if (semesterFilter) {
+        const block = sortedScores.find(b => String(b?.name || '') === semesterFilter);
+        const rows = Array.isArray(block?.score) ? block.score : [];
+        semAvg = computeAvg(rows);
+    }
+    if (elements.gradesSummary) {
+        const cards = [];
+        cards.push(`<div class="stc-summary-card"><div class="stc-summary-label">Số tín chỉ đã học (ước tính)</div><div class="stc-summary-value">${Math.round(chungCreditsLearned)}</div><div class="stc-summary-sub">Theo kết quả tốt nhất mỗi môn</div></div>`);
+        cards.push(`<div class="stc-summary-card"><div class="stc-summary-label">Số tín chỉ tích lũy (ước tính)</div><div class="stc-summary-value">${Math.round(chungCreditsAccum)}</div><div class="stc-summary-sub">Chỉ tính môn đạt (≥ 5.0)</div></div>`);
+        cards.push(`<div class="stc-summary-card"><div class="stc-summary-label">Điểm trung bình chung (ước tính)</div><div class="stc-summary-value">${chung.avg === null ? '-' : chung.avg.toFixed(2)}</div><div class="stc-summary-sub">Trọng số theo tín chỉ</div></div>`);
+        cards.push(`<div class="stc-summary-card"><div class="stc-summary-label">Điểm trung bình chung tích lũy (ước tính)</div><div class="stc-summary-value">${chungTichLuy.avg === null ? '-' : chungTichLuy.avg.toFixed(2)}</div><div class="stc-summary-sub">Chỉ tính môn đạt</div></div>`);
+        cards.push(`<div class="stc-summary-card"><div class="stc-summary-label">Trung bình học kỳ (ước tính)</div><div class="stc-summary-value">${!semAvg || semAvg.avg === null ? '-' : semAvg.avg.toFixed(2)}</div><div class="stc-summary-sub">${semesterFilter ? escapeHtml(semesterFilter) : 'Chọn kỳ để xem'}</div></div>`);
+        elements.gradesSummary.innerHTML = cards.join('');
+    }
+
+    const blocks = sortedScores.map((block, blockIdx) => {
+        const title = escapeHtml(block?.name || 'Điểm');
+        const rows = Array.isArray(block?.score) ? block.score : [];
+        if (semesterFilter && String(block?.name || '') !== semesterFilter) return '';
+        const filtered = q
+            ? rows.filter(r => {
+                const hay = `${r?.mamh || ''} ${r?.tenmh || ''} ${r?.malop || ''}`.toLowerCase();
+                return hay.includes(q);
+            })
+            : rows;
+
+        if (!filtered.length) return '';
+
+        const tone = blockIdx % 4;
+        const bodyRows = filtered.map(r => {
+            const mamh = escapeHtml(r?.mamh);
+            const tenmh = escapeHtml(r?.tenmh);
+            const malop = escapeHtml(r?.malop);
+            const sotc = escapeHtml(r?.sotc);
+            const loaimh = escapeHtml(r?.loaimh);
+            const diem = r?.diem === null || r?.diem === undefined ? '' : escapeHtml(r?.diem);
+            const d1 = r?.diem1 === null || r?.diem1 === undefined ? '' : escapeHtml(r?.diem1);
+            const d2 = r?.diem2 === null || r?.diem2 === undefined ? '' : escapeHtml(r?.diem2);
+            const d3 = r?.diem3 === null || r?.diem3 === undefined ? '' : escapeHtml(r?.diem3);
+            const d4 = r?.diem4 === null || r?.diem4 === undefined ? '' : escapeHtml(r?.diem4);
+            const diemClass = gradeFinalCellClass(r?.diem);
+            return `<tr>
+                <td class="stc-gc-mamh">${mamh}</td>
+                <td>${tenmh}</td>
+                <td class="stc-gc-malop">${malop}</td>
+                <td class="num">${sotc}</td>
+                <td><span class="stc-loai-pill">${loaimh}</span></td>
+                <td class="num">${d1}</td>
+                <td class="num">${d2}</td>
+                <td class="num">${d3}</td>
+                <td class="num">${d4}</td>
+                <td class="num strong ${diemClass}">${diem}</td>
+            </tr>`;
+        }).join('');
+
+        return `<div class="stc-grade-block stc-grade-block--t${tone}">
+            <div class="stc-grade-title">${title}</div>
+            <div class="stc-grade-table-wrap">
+                <table class="stc-grade-table">
+                    <thead>
+                        <tr>
+                            <th>Mã</th>
+                            <th>Tên môn</th>
+                            <th>Mã lớp</th>
+                            <th class="num">TC</th>
+                            <th>Loại</th>
+                            <th class="num">1</th>
+                            <th class="num">2</th>
+                            <th class="num">3</th>
+                            <th class="num">4</th>
+                            <th class="num">Tổng</th>
+                        </tr>
+                    </thead>
+                    <tbody>${bodyRows}</tbody>
+                </table>
+            </div>
+        </div>`;
+    }).filter(Boolean).join('');
+
+    elements.gradesContent.innerHTML = blocks || '<div class="empty-state"><h3>Không có kết quả</h3><p>Hãy thử từ khóa khác.</p></div>';
+}
+
+function parseVietnameseDate(text) {
+    const t = String(text || '');
+    let m = /ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(\d{4})/i.exec(t);
+    if (!m) {
+        m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(t);
+    }
+    if (!m) return null;
+    const dd = parseInt(m[1], 10);
+    const mm = parseInt(m[2], 10) - 1;
+    const yy = parseInt(m[3], 10);
+    if (!Number.isFinite(dd) || !Number.isFinite(mm) || !Number.isFinite(yy)) return null;
+    const d = new Date(yy, mm, dd);
+    d.setHours(0, 0, 0, 0);
+    return d;
+}
+
+function parsePeriods(text) {
+    const t = String(text || '');
+    const m = /Tiết\s*([0-9,\s]+)/i.exec(t);
+    if (!m) return [];
+    const raw = m[1]
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+    const out = [];
+    raw.forEach(s => {
+        const n = parseInt(s, 10);
+        if (Number.isFinite(n)) out.push(n);
+    });
+    return Array.from(new Set(out)).filter(n => n >= 1 && n <= 10).sort((a, b) => a - b);
+}
+
+function parseClassCode(text) {
+    const t = String(text || '');
+    const m1 = /(\b[A-Z]{2,}\d{2,3}\.[A-Z]\d{1,3}(?:\.\d+)?\b)/.exec(t);
+    return m1 ? m1[1].toUpperCase() : null;
+}
+
+function parseRoom(text) {
+    const t = String(text || '');
+    const m = /Phòng\s+([A-Z0-9\.]+)/i.exec(t);
+    return m ? m[1] : '';
+}
+
+function normalizeScheduleUpdatesFromNotify(notifyList) {
+    const list = Array.isArray(notifyList) ? notifyList : [];
+    const out = [];
+    list.forEach(n => {
+        const type = String(n?.type || '').trim().toUpperCase();
+        const title = String(n?.title || '');
+        const content = String(n?.content || '');
+        const dated = String(n?.dated || '');
+        const id = String(n?.id || `${type}-${dated}-${title}`); 
+        const code = parseClassCode(title) || parseClassCode(content);
+        const date = parseVietnameseDate(content) || parseVietnameseDate(title);
+        const periodsFromContent = parsePeriods(content);
+        const periods = periodsFromContent.length ? periodsFromContent : parsePeriods(title);
+        const room = type === 'BB' ? parseRoom(content) : '';
+        if (type !== 'BB' && type !== 'BN') return;
+        out.push({
+            id,
+            type,
+            title,
+            content,
+            code,
+            date,
+            periods,
+            room,
+            dated,
+        });
+    });
+    out.sort((a, b) => {
+        const ta = a.date ? a.date.getTime() : 0;
+        const tb = b.date ? b.date.getTime() : 0;
+        if (tb !== ta) return tb - ta;
+        return String(b.dated || '').localeCompare(String(a.dated || ''));
+    });
+    return out;
+}
+
+function getCurrentSemesterCoursePrefixes() {
+    const currentSemester = Array.isArray(appState.semesters) && appState.semesters.length ? appState.semesters[0] : null;
+    if (!currentSemester) return new Set();
+    const prefixes = new Set();
+    const currentCourses = (appState.courses || []).filter(course => {
+        const semId = appState.courseSemMap.get(course.id);
+        return semId === currentSemester.id;
+    });
+    currentCourses.forEach(c => {
+        const s = `${c.shortname || ''} ${c.fullname || ''}`.toUpperCase();
+        const m = /(\b[A-Z]{2,}\d{2,3}\b)/.exec(s);
+        if (m) prefixes.add(m[1]);
+    });
+    return prefixes;
+}
+
+function getCurrentSemesterCourseCores() {
+    const currentSemester = Array.isArray(appState.semesters) && appState.semesters.length ? appState.semesters[0] : null;
+    if (!currentSemester) return new Set();
+    const cores = new Set();
+    const currentCourses = (appState.courses || []).filter(course => {
+        const semId = appState.courseSemMap.get(course.id);
+        return semId === currentSemester.id;
+    });
+    currentCourses.forEach(c => {
+        const s = `${c.shortname || ''} ${c.fullname || ''}`.toUpperCase();
+        const m = /(\b[A-Z]{2,}\d{2,3}\.[A-Z]\d{2,3}\b)/.exec(s);
+        if (m) cores.add(m[1]);
+    });
+    return cores;
+}
+
+function populateScheduleUpdatesCourseFilter() {
+    if (!elements.scheduleUpdatesCourse) return;
+    const coresAllowed = getCurrentSemesterCourseCores();
+    const all = Array.isArray(appState.scheduleOverrides) ? appState.scheduleOverrides : [];
+    const codes = Array.from(new Set(all
+        .filter(it => it.code)
+        .map(it => String(it.code).toUpperCase())
+        .filter(code => {
+            const core = code.split('.').slice(0, 2).join('.');
+            return coresAllowed.size === 0 ? true : coresAllowed.has(core);
+        })
+        .map(code => code.split('.').slice(0, 2).join('.'))
+    )).sort((a, b) => a.localeCompare(b));
+
+    const currentValue = elements.scheduleUpdatesCourse.value;
+    const options = ['<option value="">Tất cả môn (kỳ hiện tại)</option>']
+        .concat(codes.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`));
+    elements.scheduleUpdatesCourse.innerHTML = options.join('');
+    elements.scheduleUpdatesCourse.value = codes.includes(currentValue) ? currentValue : '';
+}
+
+function renderScheduleUpdates() {
+    if (!elements.scheduleUpdatesList) return;
+    const all = Array.isArray(appState.scheduleOverrides) ? appState.scheduleOverrides : [];
+    const q = String(elements.scheduleUpdatesSearch?.value || '').trim().toLowerCase();
+    const typeFilter = String(elements.scheduleUpdatesType?.value || '').trim();
+    const courseFilter = String(elements.scheduleUpdatesCourse?.value || '').trim().toUpperCase();
+    const sortMode = String(elements.scheduleUpdatesSort?.value || 'event_asc');
+    const rangeMode = String(elements.scheduleUpdatesRange?.value || 'active');
+    const coresAllowed = getCurrentSemesterCourseCores();
+
+    let filtered = all.filter(it => {
+        if (typeFilter && it.type !== typeFilter) return false;
+        if (it.code) {
+            const core = String(it.code).toUpperCase().split('.').slice(0, 2).join('.');
+            if (coresAllowed.size && !coresAllowed.has(core)) return false;
+        } else if (coresAllowed.size) {
+            return false;
+        }
+        if (courseFilter) {
+            const core = String(it.code).toUpperCase().split('.').slice(0, 2).join('.');
+            if (core !== courseFilter) return false;
+        }
+        if (!q) return true;
+        const hay = `${it.code || ''} ${it.title || ''} ${it.content || ''}`.toLowerCase();
+        return hay.includes(q);
+    });
+
+    if (rangeMode === 'active') {
+        filtered = filtered.filter(it => !isScheduleItemPast(it));
+    } else if (rangeMode === 'archive') {
+        filtered = filtered.filter(it => isScheduleItemPast(it));
+    }
+
+    filtered.sort((a, b) => {
+        if (sortMode === 'event_asc') return sortKeyEventMs(a) - sortKeyEventMs(b);
+        if (sortMode === 'event_desc') return sortKeyEventMs(b) - sortKeyEventMs(a);
+        if (sortMode === 'posted_new') return notifyPostedMs(b) - notifyPostedMs(a);
+        if (sortMode === 'posted_old') return notifyPostedMs(a) - notifyPostedMs(b);
+        return sortKeyEventMs(a) - sortKeyEventMs(b);
+    });
+
+    if (!filtered.length) {
+        const hint = !all.length
+            ? '<p>Hãy đăng nhập và làm mới để tải lịch nghỉ/bù.</p>'
+            : rangeMode === 'active'
+                ? '<p>Không có buổi nghỉ/bù chưa diễn ra. Chọn «Tất cả» hoặc «Đã qua» để xem lịch cũ.</p>'
+                : rangeMode === 'archive'
+                    ? '<p>Không có mục đã qua trong bộ lọc hiện tại.</p>'
+                    : '<p>Thử đổi bộ lọc hoặc từ khóa tìm kiếm.</p>';
+        elements.scheduleUpdatesList.innerHTML = `<div class="empty-state"><h3>Chưa có dữ liệu</h3>${hint}</div>`;
+        return;
+    }
+
+    const getAccentFromCode = (code) => {
+        const colorSettings = window.__courseColors || appState.courseColors || {};
+        const core = String(code || '').toUpperCase().split('.').slice(0, 2).join('.');
+        const fromSettings = core && colorSettings[core] ? colorSettings[core] : (code && colorSettings[String(code).toUpperCase()] ? colorSettings[String(code).toUpperCase()] : null);
+        if (fromSettings?.bg) {
+            return { bg: fromSettings.bg, border: fromSettings.border || fromSettings.bg };
+        }
+        const s = core || String(code || '');
+        let h = 0;
+        for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+        const hue = h % 360;
+        return {
+            bg: `hsla(${hue}, 85%, 90%, 0.95)`,
+            border: `hsla(${hue}, 70%, 55%, 0.45)`,
+            accent: `hsl(${hue}, 70%, 45%)`,
+        };
+    };
+
+    elements.scheduleUpdatesList.innerHTML = filtered.map(it => {
+        const dateLabel = it.date ? it.date.toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+        const core = String(it.code || '').toUpperCase().split('.').slice(0, 2).join('.');
+        const acc = getAccentFromCode(core || it.code);
+        const styleVars = `--stc-bg:${acc.bg};--stc-border:${acc.border};--stc-accent:${acc.accent || 'var(--uit-accent)'}`;
+        const typeLabel = it.type === 'BN' ? 'Nghỉ' : 'Bù';
+        const typeTone = it.type === 'BN' ? 'danger' : 'info';
+        const periods = it.periods && it.periods.length ? `Tiết ${it.periods.join(',')}` : '';
+        const room = it.room ? `P. ${it.room}` : '';
+        const startDt = scheduleItemStartDate(it);
+        const cd = startDt ? formatScheduleCountdown(startDt.getTime()) : { text: '—', tone: 'muted' };
+        const cdClass = cd.tone === 'urgent' ? 'stc-countdown-urgent' : cd.tone === 'soon' ? 'stc-countdown-soon' : cd.tone === 'muted' ? 'stc-countdown-muted' : 'stc-countdown-calm';
+        const chips = [
+            `<span class="stc-chip ${typeTone}">${escapeHtml(typeLabel)}</span>`,
+            core ? `<span class="stc-chip stc-chip-mono">${escapeHtml(core)}</span>` : '',
+            dateLabel ? `<span class="stc-chip">${escapeHtml(dateLabel)}</span>` : '',
+            periods ? `<span class="stc-chip">${escapeHtml(periods)}</span>` : '',
+            room ? `<span class="stc-chip stc-chip-room">${escapeHtml(room)}</span>` : '',
+        ].filter(Boolean).join('');
+
+        const title = formatScheduleItemDisplayTitle(it);
+        return `<div class="stc-item stc-item-colored" data-type="${escapeHtml(it.type)}" style="${styleVars}">
+            <div class="stc-item-row">
+                <div class="stc-item-main">
+                    <div class="stc-item-title">${escapeHtml(title)}</div>
+                    <div class="stc-item-chips">${chips}</div>
+                </div>
+                <div class="stc-item-aside">
+                    <div class="stc-countdown-label">Đếm ngược</div>
+                    <div class="stc-countdown-value ${cdClass}">${escapeHtml(cd.text)}</div>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
 }
 
 function initWeek(refDate) {
@@ -2624,48 +3661,138 @@ function renderTimetable() {
             html += `<div class=\"tt-cell\" style=\"grid-column:${gridCol};grid-row:${gridRow};\"></div>`;
         }
     }
-    // Events: create positioned items spanning rows
+    const sameDayLocal = (a, b) => a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 5); weekEnd.setHours(23, 59, 59, 999);
+
+    const baseItems = [];
     for (const ev of appState.timetableEvents) {
         if (!days.includes(ev.dow)) continue;
-        const dayDate = new Date(weekStart); dayDate.setDate(weekStart.getDate()+ev.dow-1);
+        const dayDate = new Date(weekStart); dayDate.setDate(weekStart.getDate() + ev.dow - 1); dayDate.setHours(0, 0, 0, 0);
         if (!isEventActiveOnDate(ev, dayDate)) continue;
         let pStart, pEnd;
         if (ev.periods && ev.periods.length) {
             pStart = ev.periods[0];
-            pEnd = ev.periods[ev.periods.length-1];
+            pEnd = ev.periods[ev.periods.length - 1];
         } else {
-            // Approximate from minutes
             const map = [
-                [450,495],[495,540],[540,585],[600,645],[645,690], // morning slots boundaries
-                [780,825],[825,870],[870,915],[930,975],[975,1020]
+                [450, 495], [495, 540], [540, 585], [600, 645], [645, 690],
+                [780, 825], [825, 870], [870, 915], [930, 975], [975, 1020],
             ];
-            const findIdx = (m) => map.findIndex(([s,e]) => m >= s && m < e) + 1;
+            const findIdx = (m) => map.findIndex(([s, e]) => m >= s && m < e) + 1;
             pStart = findIdx(ev.startMin) || 1;
-            pEnd = findIdx(ev.endMin-1) || pStart;
+            pEnd = findIdx(ev.endMin - 1) || pStart;
         }
-        const col = days.indexOf(ev.dow)+2; // +1 for time column, +1 because CSS grid is 1-based
-        const rowStart = 1 /* header row */ + 1 /* first time row */ + (pStart-1);
+        const col = days.indexOf(ev.dow) + 2;
+        const rowStart = 2 + (pStart - 1);
         const rowEnd = rowStart + (pEnd - pStart + 1);
-    const roomLabel = ev.location ? (ev.location.startsWith('P.') ? ev.location : `P. ${ev.location}`) : '';
-    const pLabel = pStart === pEnd ? `Tiết ${pStart}` : `Tiết ${pStart}-${pEnd}`;
-    const codeHtml = ev.code ? `<div class=\"tt-event-code\">${ev.code}</div>` : '';
-    const baseTitle = ev.title || 'Môn học';
-    // Remove code prefix inside title if duplicate
-    const cleanedTitle = ev.code ? baseTitle.replace(ev.code, '').replace(/^[\s-:–]+/, '').trim() : baseTitle;
-    const nameHtml = `<div class=\"tt-event-title\">${cleanedTitle}</div>`;
-    const instrHtml = ev.instructor ? `<div class=\"tt-event-instructor\">${ev.instructor}</div>` : '';
-    const colorSettings = window.__courseColors || appState.courseColors || {};
-    const clr = ev.code && colorSettings[ev.code] ? colorSettings[ev.code] : null;
-    const styleVars = clr ? `--ev-bg:${clr.bg};--ev-border:${clr.border||clr.bg};--ev-accent:${clr.accent||clr.bg}` : '';
-    const onclick = ev.code ? ` onclick=\"openCourseByCode('${(ev.code||'').replace(/'/g, "\\'")}')\"` : '';
-    html += `<div class=\"tt-event\" style=\"grid-column:${col};grid-row:${rowStart}/${rowEnd};\"${onclick}>`+
-        `<div class=\"tt-event-inner\" data-color style=\"${styleVars}\">`+
-        codeHtml + nameHtml +
-        `<div class=\"tt-event-periods\">${pLabel}</div>`+
-        `<div class=\"tt-event-room\">${roomLabel}</div>`+
-        instrHtml +
-        `</div></div>`;
+        baseItems.push({ ev, dayDate, col, rowStart, rowEnd, pStart, pEnd });
     }
+
+    const overrides = Array.isArray(appState.scheduleOverrides) ? appState.scheduleOverrides : [];
+    const cancels = overrides.filter(o => o.type === 'BN' && o.code && o.date && o.date >= weekStart && o.date <= weekEnd);
+    const makeups = overrides.filter(o => o.type === 'BB' && o.code && o.date && o.date >= weekStart && o.date <= weekEnd);
+
+    const cancelledKeys = new Set(
+        cancels.map(c => `${c.code}::${c.date.getFullYear()}-${c.date.getMonth()}-${c.date.getDate()}`)
+    );
+
+    const items = baseItems.filter(it => {
+        if (!it.ev?.code || !it.dayDate) return true;
+        const key = `${String(it.ev.code).toUpperCase()}::${it.dayDate.getFullYear()}-${it.dayDate.getMonth()}-${it.dayDate.getDate()}`;
+        return !cancelledKeys.has(key);
+    });
+
+    makeups.forEach(m => {
+        const d = m.date;
+        if (!d) return;
+        const jsDow = d.getDay();
+        if (!days.includes(jsDow)) return;
+        const periods = Array.isArray(m.periods) ? m.periods : [];
+        if (!periods.length) return;
+        const pStart = periods[0];
+        const pEnd = periods[periods.length - 1];
+        const col = days.indexOf(jsDow) + 2;
+        const rowStart = 2 + (pStart - 1);
+        const rowEnd = rowStart + (pEnd - pStart + 1);
+        const ev = {
+            dow: jsDow,
+            periods,
+            code: m.code,
+            title: m.code,
+            location: m.room || '',
+            instructor: '',
+            single: true,
+            termStart: d,
+            until: d,
+            interval: 1,
+            source: 'override',
+            kind: 'makeup',
+        };
+        items.push({ ev, dayDate: d, col, rowStart, rowEnd, pStart, pEnd, isMakeup: true });
+    });
+
+    const byCol = new Map();
+    items.forEach(it => {
+        if (!byCol.has(it.col)) byCol.set(it.col, []);
+        byCol.get(it.col).push(it);
+    });
+
+    const groups = [];
+    Array.from(byCol.entries()).forEach(([col, list]) => {
+        list.sort((a, b) => a.rowStart - b.rowStart);
+        let current = null;
+        list.forEach(it => {
+            if (!current) {
+                current = { col, rowStart: it.rowStart, rowEnd: it.rowEnd, items: [it] };
+                return;
+            }
+            const overlap = it.rowStart < current.rowEnd && it.rowEnd > current.rowStart;
+            if (overlap) {
+                current.items.push(it);
+                current.rowStart = Math.min(current.rowStart, it.rowStart);
+                current.rowEnd = Math.max(current.rowEnd, it.rowEnd);
+            } else {
+                groups.push(current);
+                current = { col, rowStart: it.rowStart, rowEnd: it.rowEnd, items: [it] };
+            }
+        });
+        if (current) groups.push(current);
+    });
+
+    const buildEventInner = (ev) => {
+        const roomLabel = ev.location ? (String(ev.location).startsWith('P.') ? ev.location : `P. ${ev.location}`) : '';
+        const code = ev.code || ev.title || 'Môn học';
+        const colorSettings = window.__courseColors || appState.courseColors || {};
+        const key = String(code || '').toUpperCase();
+        const clr = key && colorSettings[key] ? colorSettings[key] : null;
+        const styleVars = clr ? `--ev-bg:${clr.bg};--ev-border:${clr.border || clr.bg};--ev-accent:${clr.accent || clr.bg}` : '';
+        return `<div class="tt-event-inner" data-color style="${styleVars}">` +
+            `<div class="tt-event-code">${escapeHtml(code)}</div>` +
+            `<div class="tt-event-room">${escapeHtml(roomLabel)}</div>` +
+            `</div>`;
+    };
+
+    groups.forEach(g => {
+        const rowStart = g.rowStart;
+        const rowEnd = g.rowEnd;
+        const col = g.col;
+        const clickableCode = g.items.find(x => x.ev && x.ev.code)?.ev?.code;
+        const onclick = clickableCode ? ` onclick="openCourseByCode('${String(clickableCode).replace(/'/g, "\\'")}')"` : '';
+        if (g.items.length === 1) {
+            const it = g.items[0];
+            html += `<div class="tt-event" style="grid-column:${col};grid-row:${rowStart}/${rowEnd};"${onclick}>` +
+                buildEventInner(it.ev) +
+                `</div>`;
+        } else {
+            const primary = g.items[0];
+            const hiddenCount = Math.max(0, g.items.length - 1);
+            const moreBadge = hiddenCount ? `<div class="tt-stack-more">+${hiddenCount}</div>` : '';
+            html += `<div class="tt-event tt-event-stack" style="grid-column:${col};grid-row:${rowStart}/${rowEnd};"${onclick}>` +
+                moreBadge +
+                buildEventInner(primary.ev) +
+                `</div>`;
+        }
+    });
     html += '</div>';
     elements.timetableGrid.innerHTML = html;
     highlightCurrentTimetableState();
@@ -3116,6 +4243,10 @@ async function initializeApp() {
         await loadSiteInfo();
         await loadUserCourses();
         await loadCategoriesForCourses();
+        try {
+            hydrateStcDerivedData();
+            renderScheduleUpdates();
+        } catch {}
         
         // Update UI
         elements.userName.textContent = appState.currentUser.fullname;
@@ -3800,7 +4931,9 @@ class SmartNotificationSystem {
 
             // Filter content to only include recent ones (last 2 months)
             const twoMonthsAgo = Date.now() - (2 * 30 * 24 * 60 * 60 * 1000);
-            const recentContent = appState.feedData.allContent.filter(content => {
+            const allContent = Array.isArray(appState.feedData?.allContent) ? appState.feedData.allContent : [];
+            if (allContent.length === 0) return;
+            const recentContent = allContent.filter(content => {
                 const modifiedDate = content.modified * 1000;
                 return modifiedDate > twoMonthsAgo;
             });
@@ -4667,6 +5800,7 @@ function closeAssignmentDetails() {
 // Ensure global accessibility for inline onclick handlers
 window.openCourseDetails = openCourseDetails;
 window.openCourseInBrowser = openCourseInBrowser;
+window.openCourseInApp = openCourseInApp;
 window.openSubmission = openSubmission;
 
 function setAssignmentPriority(priority) {
@@ -5231,6 +6365,141 @@ function setupEventListeners() {
             }
         });
     });
+
+    document.querySelectorAll('.dq-link').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const s = btn.getAttribute('data-nav-section');
+            if (!s) return;
+            const navEl = document.querySelector(`.sidebar-nav .nav-item[data-section="${s}"]`);
+            if (navEl) navEl.click();
+        });
+    });
+
+    if (elements.stcRefreshGrades) {
+        elements.stcRefreshGrades.addEventListener('click', async () => {
+            try {
+                await stcFetchAll({ force: true });
+                renderGrades();
+                showNotification('Đã làm mới điểm', 'success');
+            } catch (e) {
+                showNotification(e.message || 'Không thể làm mới', 'error');
+            }
+        });
+    }
+    if (elements.gradesSearch) {
+        elements.gradesSearch.addEventListener('input', () => renderGrades());
+    }
+    if (elements.stcRefreshUpdates) {
+        elements.stcRefreshUpdates.addEventListener('click', async () => {
+            try {
+                const data = await stcFetchAll({ force: true });
+                appState.scheduleOverrides = normalizeScheduleUpdatesFromNotify(data?.notify);
+                renderScheduleUpdates();
+                showNotification('Đã làm mới', 'success');
+            } catch (e) {
+                showNotification(e.message || 'Không thể làm mới', 'error');
+            }
+        });
+    }
+    if (elements.scheduleUpdatesSearch) {
+        elements.scheduleUpdatesSearch.addEventListener('input', () => renderScheduleUpdates());
+    }
+    if (elements.scheduleUpdatesType) {
+        elements.scheduleUpdatesType.addEventListener('change', () => renderScheduleUpdates());
+    }
+    if (elements.scheduleUpdatesCourse) {
+        elements.scheduleUpdatesCourse.addEventListener('change', () => renderScheduleUpdates());
+    }
+    if (elements.scheduleUpdatesSort) {
+        elements.scheduleUpdatesSort.addEventListener('change', () => renderScheduleUpdates());
+    }
+    if (elements.scheduleUpdatesRange) {
+        elements.scheduleUpdatesRange.addEventListener('change', () => renderScheduleUpdates());
+    }
+    if (elements.assignmentsRefreshBtn) {
+        elements.assignmentsRefreshBtn.addEventListener('click', async () => {
+            try {
+                await updateAssignmentsList({ force: true });
+                showNotification('Đã làm mới danh sách bài tập', 'success');
+            } catch (e) {
+                showNotification(e?.message || 'Không thể làm mới', 'error');
+            }
+        });
+    }
+    if (elements.gradesSemester) {
+        elements.gradesSemester.addEventListener('change', () => renderGrades());
+    }
+    if (elements.gradesSort) {
+        elements.gradesSort.addEventListener('change', () => renderGrades());
+    }
+
+    const openStcProfile = async (e) => {
+        try { e?.stopPropagation?.(); } catch {}
+        const modal = elements.stcProfileModal;
+        if (!modal) return;
+        modal.classList.remove('hidden');
+        requestAnimationFrame(() => {
+            modal.classList.add('showing');
+        });
+        await loadStcCachedProfileIntoUI();
+        const sid = String(appState.stc?.sid || '').trim();
+        if (sid) {
+            try { await fetchAndCacheStcProfile({ force: false }); } catch {}
+        }
+    };
+    if (elements.stcOpenProfileUpdates) elements.stcOpenProfileUpdates.addEventListener('click', openStcProfile);
+    if (elements.stcOpenProfileGrades) elements.stcOpenProfileGrades.addEventListener('click', openStcProfile);
+    if (elements.openStcProfileSettings) elements.openStcProfileSettings.addEventListener('click', openStcProfile);
+    const footerProfile = document.querySelector('.sidebar-footer .user-profile');
+    if (footerProfile) footerProfile.addEventListener('click', openStcProfile);
+    const closeStcProfile = (e) => {
+        try { e?.stopPropagation?.(); } catch {}
+        const modal = elements.stcProfileModal;
+        if (!modal) return;
+        modal.classList.remove('showing');
+        setTimeout(() => {
+            modal.classList.add('hidden');
+        }, 220);
+    };
+    if (elements.stcProfileClose) elements.stcProfileClose.addEventListener('click', closeStcProfile);
+    if (elements.stcProfileModal) {
+        elements.stcProfileModal.addEventListener('click', (e) => {
+            if (e.target === elements.stcProfileModal) closeStcProfile(e);
+        });
+    }
+    if (elements.stcProfileLogin) {
+        elements.stcProfileLogin.addEventListener('click', async () => {
+            const ok = await stcLoginFromProfile();
+            if (!ok) return;
+            try {
+                const data = await stcFetchAll({ force: true });
+                appState.scheduleOverrides = normalizeScheduleUpdatesFromNotify(data?.notify);
+                renderScheduleUpdates();
+                renderGrades();
+                updateSmartDashboard();
+                showNotification('Đã kết nối STC', 'success');
+            } catch (e) {
+                showNotification(e.message || 'Không thể tải dữ liệu', 'error');
+            }
+        });
+    }
+    if (elements.stcProfileClear) {
+        elements.stcProfileClear.addEventListener('click', async () => {
+            const res = await window.electronAPI.stcClearCredentials();
+            if (!res?.success) {
+                showNotification(res?.error || 'Không thể xóa', 'error');
+                return;
+            }
+            appState.stc.allData = null;
+            appState.scheduleOverrides = [];
+            await loadStcAuthStateIntoForms();
+            await loadStcCachedProfileIntoUI();
+            renderGrades();
+            renderScheduleUpdates();
+            updateSmartDashboard();
+            showNotification('Đã xóa thông tin STC đã lưu', 'success');
+        });
+    }
     
     // Filter events
     elements.semesterFilter.addEventListener('change', async () => { 
@@ -5498,13 +6767,7 @@ function setupEventListeners() {
     const settingsThemeBtn = document.getElementById('settings-theme-toggle');
     if (settingsThemeBtn) settingsThemeBtn.addEventListener('click', toggleThemeInSettings);
     
-    // Sidebar user profile click
-    const userProfile = document.querySelector('.user-profile');
-    if (userProfile) {
-        userProfile.addEventListener('click', () => {
-            showSection('settings');
-        });
-    }
+    // Sidebar user profile click is reserved for STC profile modal
 
     // TLS checkbox
     if (elements.allowInsecureTLS) {
@@ -5709,6 +6972,16 @@ function openCourseInBrowser(courseId) {
     }
 }
 
+function openCourseInApp(courseId) {
+    try {
+        showLoading('Đang mở trong app...', 'open-external-loading');
+        const courseUrl = `${appState.baseUrl}/course/view.php?id=${courseId}`;
+        window.electronAPI.openCourseInApp(courseUrl);
+    } finally {
+        setTimeout(() => hideLoading('open-external-loading'), 500);
+    }
+}
+
 async function loadCourseDetailsContent(courseId) {
     try {
         console.log('Loading course details content for course:', courseId);
@@ -5864,6 +7137,9 @@ function renderCourseDetailsContent(contentByType, courseDetails = {}) {
                             <button class="btn btn-primary course-action-btn" onclick="openCourseInBrowser(${currentCourseDetails.id})">
                                 <i class="fas fa-external-link-alt"></i>
                                 Mở web
+                            </button>
+                            <button class="btn btn-outline course-action-btn" onclick="openCourseInApp(${currentCourseDetails.id})">
+                                Mở trong app
                             </button>
                             <button class="btn btn-outline course-action-btn" onclick="refreshCourseDetails()">
                                 <i class="fas fa-sync-alt"></i>
@@ -6334,12 +7610,63 @@ async function init() {
     // Setup event listeners
     setupEventListeners();
     await applyThemeFromSettings();
+    await loadStcAuthStateIntoForms();
     
     // Initialize sidebar
     updateSidebarUserInfo();
+    if (elements.stcProfileName) elements.stcProfileName.textContent = appState.currentUser?.fullname || '-';
+    if (elements.stcProfileStudentId) elements.stcProfileStudentId.textContent = appState.currentStudentId || '-';
     
     // Initialize smart notifications
     await smartNotifications.init();
+
+    try {
+        if (appState.stc.sid) {
+            await stcFetchAll({ force: false });
+            await fetchAndCacheStcProfile({ force: false });
+            hydrateStcDerivedData();
+            renderGrades();
+            renderScheduleUpdates();
+        }
+    } catch {}
+
+    try {
+        updateSmartDashboard();
+    } catch {}
+
+    try {
+        const settings = await window.electronAPI.getSettings();
+        const enabled = Boolean(settings?.stcAutoRefreshEnabled);
+        const minutes = Number(settings?.stcAutoRefreshMinutes) || 15;
+        if (elements.stcAutoRefreshEnabled) elements.stcAutoRefreshEnabled.checked = enabled;
+        if (elements.stcAutoRefreshMinutes) elements.stcAutoRefreshMinutes.value = minutes;
+
+        const apply = async () => {
+            const en = Boolean(elements.stcAutoRefreshEnabled?.checked);
+            const mins = Math.max(5, Math.min(180, Number(elements.stcAutoRefreshMinutes?.value) || 15));
+            await window.electronAPI.setSetting('stcAutoRefreshEnabled', en);
+            await window.electronAPI.setSetting('stcAutoRefreshMinutes', mins);
+        };
+        if (elements.stcAutoRefreshEnabled) elements.stcAutoRefreshEnabled.addEventListener('change', apply);
+        if (elements.stcAutoRefreshMinutes) elements.stcAutoRefreshMinutes.addEventListener('change', apply);
+    } catch {}
+
+    try {
+        if (window.__stcAutoRefreshInterval) clearInterval(window.__stcAutoRefreshInterval);
+        window.__stcAutoRefreshInterval = setInterval(async () => {
+            try {
+                const settings = await window.electronAPI.getSettings();
+                if (!shouldStcRefreshNow(settings)) return;
+                if (!appState.stc.sid) return;
+                await stcFetchAll({ force: true });
+                await window.electronAPI.setSetting('stcLastRefreshAt', Date.now());
+                hydrateStcDerivedData();
+                renderGrades();
+                renderScheduleUpdates();
+                updateSmartDashboard();
+            } catch {}
+        }, 60 * 1000);
+    } catch {}
     
     // Load saved accounts
     await loadSavedAccounts();

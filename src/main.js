@@ -9,6 +9,109 @@ const notifier = require('node-notifier');
 // Khởi tạo electron-store để lưu trữ dữ liệu
 const store = new Store();
 
+function base64EncodeUtf8(text) {
+  return Buffer.from(String(text || ''), 'utf8').toString('base64');
+}
+
+function buildUitAuHeaderFromToken(token) {
+  const raw = `3sn@fah.${String(token || '')}:`;
+  return `UitAu ${base64EncodeUtf8(raw)}`;
+}
+
+function buildUitAuHeaderFromCredentials(sid, password) {
+  const raw = `3sn@fah.${String(sid || '')}:${String(password || '')}`;
+  return `UitAu ${base64EncodeUtf8(raw)}`;
+}
+
+const STC_BASE_URL = 'https://apiservice.uit.edu.vn';
+
+function getStcStoredAuth() {
+  try {
+    const auth = store.get('stcAuth', {});
+    return auth && typeof auth === 'object' ? auth : {};
+  } catch {
+    return {};
+  }
+}
+
+function setStcStoredAuth(next) {
+  try {
+    store.set('stcAuth', next && typeof next === 'object' ? next : {});
+  } catch {}
+}
+
+function getStcStoredCache() {
+  try {
+    const cache = store.get('stcCache', {});
+    return cache && typeof cache === 'object' ? cache : {};
+  } catch {
+    return {};
+  }
+}
+
+function setStcStoredCache(next) {
+  try {
+    store.set('stcCache', next && typeof next === 'object' ? next : {});
+  } catch {}
+}
+
+function isStcTokenValid(auth, sid) {
+  if (!auth || typeof auth !== 'object') return false;
+  const s = String(sid || auth.sid || '');
+  if (!s || String(auth.sid || '') !== s) return false;
+  if (!auth.token) return false;
+  if (!auth.expiresAt) return true;
+  const expiresMs = Date.parse(auth.expiresAt);
+  if (!Number.isFinite(expiresMs)) return true;
+  return Date.now() < (expiresMs - 60 * 1000);
+}
+
+async function stcGenerateToken({ sid, password }) {
+  const headers = {
+    'content-type': 'application/json; charset=utf-8',
+    authorization: buildUitAuHeaderFromCredentials(sid, password),
+  };
+  const url = `${STC_BASE_URL}/v2/stc/generate`;
+  const resp = await axios.post(url, {}, { headers, timeout: 30000 });
+  const token = resp?.data?.token;
+  const expiresAt = resp?.data?.expires;
+  if (!token) throw new Error('Không lấy được token');
+  return { token, expiresAt: expiresAt || null };
+}
+
+async function stcGetData({ token, task }) {
+  const url = `${STC_BASE_URL}/v2/data?task=${encodeURIComponent(task)}&v=1`;
+  const headers = {
+    'content-type': 'application/json',
+    authorization: buildUitAuHeaderFromToken(token),
+  };
+  const resp = await axios.get(url, { headers, timeout: 30000 });
+  return resp?.data;
+}
+
+async function stcEnsureTokenForSid({ sid, forceLogin = false }) {
+  const auth = getStcStoredAuth();
+  if (!forceLogin && isStcTokenValid(auth, sid)) return auth;
+
+  const s = String(sid || auth.sid || '');
+  if (!s) throw new Error('Thiếu MSSV');
+  const stored = auth && auth.sid === s ? auth : {};
+  const password = stored?.password;
+  if (!password) throw new Error('Chưa lưu mật khẩu');
+
+  const { token, expiresAt } = await stcGenerateToken({ sid: s, password });
+  const next = {
+    sid: s,
+    token,
+    expiresAt,
+    password,
+    savedAt: stored?.savedAt || new Date().toISOString(),
+    lastLoginAt: new Date().toISOString(),
+  };
+  setStcStoredAuth(next);
+  return next;
+}
+
 // Smart Notifications System
 class SmartNotificationManager {
   constructor() {
@@ -677,6 +780,120 @@ ipcMain.handle('set-setting', (event, key, value) => {
   return { success: true };
 });
 
+ipcMain.handle('stc-get-auth-state', () => {
+  try {
+    const auth = getStcStoredAuth();
+    return {
+      success: true,
+      data: {
+        sid: auth?.sid || null,
+        hasPassword: Boolean(auth?.password),
+        hasToken: Boolean(auth?.token),
+        expiresAt: auth?.expiresAt || null,
+        savedAt: auth?.savedAt || null,
+        lastLoginAt: auth?.lastLoginAt || null,
+      },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('stc-save-credentials', (event, sid, password) => {
+  try {
+    const s = String(sid || '').trim();
+    const p = String(password || '');
+    if (!s) throw new Error('Chưa nhập MSSV');
+    if (!p) throw new Error('Chưa nhập mật khẩu');
+    const current = getStcStoredAuth();
+    const next = {
+      ...(current && typeof current === 'object' ? current : {}),
+      sid: s,
+      password: p,
+      savedAt: current?.savedAt || new Date().toISOString(),
+    };
+    setStcStoredAuth(next);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('stc-clear-credentials', () => {
+  try {
+    const current = getStcStoredAuth();
+    const next = { ...(current && typeof current === 'object' ? current : {}) };
+    delete next.password;
+    delete next.token;
+    delete next.expiresAt;
+    setStcStoredAuth(next);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('stc-login', async (event, sid, password, remember) => {
+  try {
+    const s = String(sid || '').trim();
+    const p = String(password || '');
+    if (!s) throw new Error('Chưa nhập MSSV');
+    if (!p) throw new Error('Chưa nhập mật khẩu');
+    const { token, expiresAt } = await stcGenerateToken({ sid: s, password: p });
+
+    const current = getStcStoredAuth();
+    const next = {
+      ...(current && typeof current === 'object' ? current : {}),
+      sid: s,
+      token,
+      expiresAt,
+      lastLoginAt: new Date().toISOString(),
+    };
+    if (remember) {
+      next.password = p;
+      if (!next.savedAt) next.savedAt = new Date().toISOString();
+    }
+    setStcStoredAuth(next);
+    return { success: true, data: { sid: s, expiresAt: expiresAt || null } };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('stc-get-current', async (event, sid, opts) => {
+  try {
+    const s = String(sid || getStcStoredAuth()?.sid || '').trim();
+    const force = Boolean(opts && opts.force);
+    const auth = await stcEnsureTokenForSid({ sid: s, forceLogin: force });
+    const data = await stcGetData({ token: auth.token, task: 'current' });
+    return { success: true, data };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('stc-get-all', async (event, sid, opts) => {
+  try {
+    const s = String(sid || getStcStoredAuth()?.sid || '').trim();
+    if (!s) throw new Error('Thiếu MSSV');
+    const force = Boolean(opts && opts.force);
+    const cache = getStcStoredCache();
+    const entry = cache[s];
+    const maxAgeMs = Number(opts?.maxAgeMs) || 10 * 60 * 1000;
+    if (!force && entry && entry.timestamp && (Date.now() - entry.timestamp) < maxAgeMs && entry.data) {
+      return { success: true, data: entry.data, cached: true, timestamp: entry.timestamp };
+    }
+
+    const auth = await stcEnsureTokenForSid({ sid: s, forceLogin: force });
+    const data = await stcGetData({ token: auth.token, task: 'all' });
+    cache[s] = { timestamp: Date.now(), data };
+    setStcStoredCache(cache);
+    return { success: true, data, cached: false, timestamp: cache[s].timestamp };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // --- Notes as Word-compatible RTF files ---
 function ensureNotesDir() {
   const notesDir = path.join(app.getPath('userData'), 'notes');
@@ -813,6 +1030,22 @@ ipcMain.handle('set-group-assignment', (event, assignmentId, isGroup) => {
   const map = settings.groupAssignments || {};
   map[String(assignmentId)] = Boolean(isGroup);
   settings.groupAssignments = map;
+  store.set('settings', settings);
+  return { success: true };
+});
+
+ipcMain.handle('get-group-submitted-assignments', () => {
+  const settings = store.get('settings', {});
+  return settings.groupSubmittedAssignments || {};
+});
+
+ipcMain.handle('set-group-submitted-assignment', (event, assignmentId, submitted) => {
+  const settings = store.get('settings', {});
+  const map = { ...(settings.groupSubmittedAssignments || {}) };
+  const k = String(assignmentId);
+  if (submitted) map[k] = true;
+  else delete map[k];
+  settings.groupSubmittedAssignments = map;
   store.set('settings', settings);
   return { success: true };
 });
@@ -1842,6 +2075,87 @@ ipcMain.handle('open-external', async (event, url) => {
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
+  }
+});
+
+function tryGetStoredStudentCredentials() {
+  const auth = getStcStoredAuth();
+  const sid = String(auth?.sid || '').trim();
+  const password = String(auth?.password || '');
+  if (!sid || !password) return null;
+  return { sid, password };
+}
+
+function shouldAutoFillCourseLogin(urlStr) {
+  try {
+    const u = new URL(String(urlStr || ''));
+    if (!/courses\.uit\.edu\.vn$/i.test(u.hostname)) return false;
+    return /\/login\/index\.php/i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function injectAutoLoginIfPossible(win) {
+  try {
+    if (!win || win.isDestroyed()) return;
+    const urlStr = win.webContents.getURL();
+    if (!shouldAutoFillCourseLogin(urlStr)) return;
+    const creds = tryGetStoredStudentCredentials();
+    if (!creds) return;
+    const sid = creds.sid;
+    const password = creds.password;
+    await win.webContents.executeJavaScript(
+      `(function(){
+        try{
+          const qs = (sel) => document.querySelector(sel);
+          const user = qs('input[name="username"]') || qs('#username') || qs('input[type="text"]');
+          const pass = qs('input[name="password"]') || qs('#password') || qs('input[type="password"]');
+          const btn = qs('button[type="submit"]') || qs('input[type="submit"]');
+          if(!user || !pass) return false;
+          if(!user.value) user.value = ${JSON.stringify(sid)};
+          if(!pass.value) pass.value = ${JSON.stringify(password)};
+          if(btn) btn.click();
+          else {
+            const form = user.closest('form') || pass.closest('form');
+            if(form) form.submit();
+          }
+          return true;
+        }catch(e){ return false; }
+      })();`,
+      true
+    );
+  } catch {}
+}
+
+ipcMain.handle('open-course-in-app', async (event, url) => {
+  try {
+    const u = String(url || '').trim();
+    if (!u) throw new Error('Thiếu URL');
+    const win = new BrowserWindow({
+      width: 1200,
+      height: 800,
+      minWidth: 900,
+      minHeight: 600,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+      },
+      autoHideMenuBar: true,
+    });
+
+    win.webContents.on('did-finish-load', async () => {
+      await injectAutoLoginIfPossible(win);
+    });
+    win.webContents.on('did-navigate', async () => {
+      await injectAutoLoginIfPossible(win);
+    });
+
+    await win.loadURL(u);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 });
 

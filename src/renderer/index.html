@@ -173,6 +173,20 @@
                             </div>
                             <span class="nav-text">Thời khóa biểu</span>
                         </div>
+
+                        <div class="nav-item" data-section="schedule-updates">
+                            <div class="nav-icon">
+                                <i class="fas fa-calendar-xmark"></i>
+                            </div>
+                            <span class="nav-text">Nghỉ/Bù</span>
+                        </div>
+
+                        <div class="nav-item" data-section="grades">
+                            <div class="nav-icon">
+                                <i class="fas fa-square-poll-vertical"></i>
+                            </div>
+                            <span class="nav-text">Điểm</span>
+                        </div>
                         
                         <div class="nav-item" data-section="exam-schedule">
                             <div class="nav-icon">
@@ -215,7 +229,7 @@
                 <!-- Dashboard Section -->
                 <section id="dashboard-section" class="content-section">
                     <div class="section-header">
-                        <h2>Tổng quan thông minh</h2>
+                        <h2>Tổng quan</h2>
                         <div class="header-actions">
                             <button id="export-calendar-btn" class="btn btn-outline btn-small">
                                 <i class="fas fa-calendar-plus"></i>
@@ -229,6 +243,17 @@
                     </div>
                     
                     <!-- Smart Stats Grid -->
+                    <div class="dashboard-context-strip">
+                        <span id="dashboard-context-line" class="dashboard-context-text"></span>
+                        <span id="dashboard-stc-gpa" class="dashboard-stc-gpa"></span>
+                    </div>
+                    <div class="dashboard-quick-nav" role="navigation" aria-label="Đi nhanh">
+                        <button type="button" class="dq-link" data-nav-section="assignments">Bài tập</button>
+                        <button type="button" class="dq-link" data-nav-section="grades">Điểm</button>
+                        <button type="button" class="dq-link" data-nav-section="schedule-updates">Nghỉ/Bù</button>
+                        <button type="button" class="dq-link" data-nav-section="timetable">Thời khóa biểu</button>
+                        <button type="button" class="dq-link" data-nav-section="exam-schedule">Lịch thi</button>
+                    </div>
                     <div class="stats-grid">
                         <div class="stat-card priority-high">
                             <div class="stat-icon">
@@ -411,6 +436,13 @@
                     </div>
 
                     <div class="timetable-actions-below">
+                        <label class="tt-source-picker">
+                            <span>Nguồn</span>
+                            <select id="timetable-source">
+                                <option value="ics">ICS</option>
+                                <option value="api">API</option>
+                            </select>
+                        </label>
                         <button id="open-tkb-web" class="btn btn-outline btn-small" title="Mở trang TKB để tải file .ics">
                             <i class="fas fa-external-link-alt"></i>
                             Mở trang TKB
@@ -420,6 +452,72 @@
                             Import .ics
                         </button>
                     </div>
+                </section>
+
+                <section id="schedule-updates-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Lịch nghỉ/bù</h2>
+                        <div class="header-actions">
+                            <button id="stc-refresh-updates" class="btn btn-primary btn-small">Làm mới</button>
+                        </div>
+                    </div>
+
+                    <div class="stc-banner">
+                        <div class="stc-banner-meta" id="stc-banner-updates"></div>
+                        <button id="stc-open-profile-updates" class="btn btn-outline btn-small">Thiết lập</button>
+                    </div>
+
+                    <div class="stc-filters">
+                        <input type="text" id="schedule-updates-search" placeholder="Tìm theo mã lớp / môn / nội dung">
+                        <select id="schedule-updates-course">
+                            <option value="">Tất cả môn (kỳ hiện tại)</option>
+                        </select>
+                        <select id="schedule-updates-type">
+                            <option value="">Tất cả</option>
+                            <option value="BN">Nghỉ</option>
+                            <option value="BB">Bù</option>
+                        </select>
+                        <select id="schedule-updates-range" title="Lọc theo đã diễn ra hay chưa">
+                            <option value="active">Chưa diễn ra (mặc định)</option>
+                            <option value="all">Tất cả</option>
+                            <option value="archive">Đã qua (lưu trữ)</option>
+                        </select>
+                        <select id="schedule-updates-sort">
+                            <option value="event_asc">Ngày buổi: sớm → muộn</option>
+                            <option value="event_desc">Ngày buổi: muộn → sớm</option>
+                            <option value="posted_new">Thông báo: mới → cũ</option>
+                            <option value="posted_old">Thông báo: cũ → mới</option>
+                        </select>
+                    </div>
+
+                    <div id="schedule-updates-list" class="stc-list"></div>
+                </section>
+
+                <section id="grades-section" class="content-section hidden">
+                    <div class="section-header">
+                        <h2>Điểm</h2>
+                        <div class="header-actions">
+                            <button id="stc-refresh-grades" class="btn btn-primary btn-small">Làm mới</button>
+                        </div>
+                    </div>
+
+                    <div class="stc-banner">
+                        <div class="stc-banner-meta" id="stc-banner-grades"></div>
+                        <button id="stc-open-profile-grades" class="btn btn-outline btn-small">Thiết lập</button>
+                    </div>
+
+                    <div class="stc-filters">
+                        <input type="text" id="grades-search" placeholder="Tìm theo mã môn / tên môn / mã lớp">
+                        <select id="grades-semester">
+                            <option value="">Tất cả kỳ</option>
+                        </select>
+                        <select id="grades-sort">
+                            <option value="newest">Mới nhất</option>
+                            <option value="oldest">Cũ nhất</option>
+                        </select>
+                    </div>
+                    <div id="grades-summary" class="stc-grades-summary"></div>
+                    <div id="grades-content" class="stc-grades"></div>
                 </section>
 
                 <!-- Exam Schedule Section -->
@@ -564,29 +662,29 @@
 
                 <!-- Assignments Section -->
                 <section id="assignments-section" class="content-section hidden">
-                    <div class="section-header">
+                    <div class="assignments-page-head">
                         <h2>Quản lý bài tập</h2>
-                        <div class="filter-controls">
-                            <select id="semester-filter">
+                        <div class="assignments-toolbar">
+                            <select id="semester-filter" aria-label="Học kỳ">
                                 <option value="">Tất cả học kỳ</option>
                             </select>
-                            <select id="course-filter">
+                            <select id="course-filter" aria-label="Môn học">
                                 <option value="">Tất cả môn học</option>
                             </select>
-                            <select id="status-filter">
+                            <select id="status-filter" aria-label="Trạng thái">
                                 <option value="">Tất cả trạng thái</option>
                                 <option value="submitted">Đã nộp</option>
                                 <option value="draft">Chưa nộp</option>
                                 <option value="late">Nộp muộn</option>
                                 <option value="group">Bài tập nhóm</option>
                             </select>
-                            <select id="sort-order" class="form-control">
+                            <select id="sort-order" class="form-control" aria-label="Sắp xếp">
                                 <option value="closest">Sắp xếp: Sắp hạn nhất</option>
                                 <option value="farthest">Sắp xếp: Xa hạn nhất</option>
                                 <option value="newest">Sắp xếp: Giao mới nhất</option>
                                 <option value="oldest">Sắp xếp: Giao cũ nhất</option>
                             </select>
-                            <!-- Nút tạo deadline thủ công đã chuyển sang tab riêng -->
+                            <button type="button" id="assignments-refresh-btn" class="btn btn-primary btn-small">Làm mới</button>
                         </div>
                     </div>
                     
@@ -707,6 +805,22 @@
                                 <i class="fas fa-exchange-alt"></i>
                                 Đổi tài khoản
                             </button>
+                        </div>
+
+                        <div class="settings-card">
+                            <h3>Cổng sinh viên</h3>
+                            <div class="setting-item">
+                                <label>Kết nối STC</label>
+                                <button id="open-stc-profile-settings" class="btn btn-outline btn-small">Mở hồ sơ</button>
+                            </div>
+                            <div class="setting-item">
+                                <label>Tự làm mới</label>
+                                <input type="checkbox" id="stc-auto-refresh-enabled" />
+                            </div>
+                            <div class="setting-item">
+                                <label>Chu kỳ làm mới (phút)</label>
+                                <input type="number" id="stc-auto-refresh-minutes" min="5" max="180" value="15" style="width:80px" />
+                            </div>
                         </div>
                         
                         <div class="settings-card">
@@ -829,6 +943,52 @@
 
     <!-- Notification Container -->
     <div id="notification-container" class="notification-container"></div>
+
+    <div id="stc-profile-modal" class="modal hidden">
+        <div class="modal-content stc-profile-modal-content">
+            <div class="modal-header">
+                <h3>Hồ sơ & Kết nối cổng sinh viên</h3>
+                <button type="button" class="modal-close" id="stc-profile-close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="stc-profile-grid">
+                    <div class="stc-profile-card stc-profile-card--info">
+                        <div class="stc-profile-title">Thông tin cá nhân</div>
+                        <p class="stc-profile-lead">Dữ liệu từ Moodle (đăng nhập app) và cổng STC khi đã đồng bộ.</p>
+                        <div class="stc-profile-row">
+                            <div class="stc-profile-label">Tên</div>
+                            <div class="stc-profile-value" id="stc-profile-name">-</div>
+                        </div>
+                        <div class="stc-profile-row">
+                            <div class="stc-profile-label">MSSV (Moodle)</div>
+                            <div class="stc-profile-value" id="stc-profile-studentid">-</div>
+                        </div>
+                        <div id="stc-profile-extra" class="stc-profile-extra"></div>
+                    </div>
+                    <div class="stc-profile-card">
+                        <div class="stc-profile-title">Đăng nhập STC (local)</div>
+                        <div class="form-group">
+                            <label for="stc-profile-sid">MSSV</label>
+                            <input type="text" id="stc-profile-sid" placeholder="Nhập MSSV">
+                        </div>
+                        <div class="form-group">
+                            <label for="stc-profile-pass">Mật khẩu</label>
+                            <input type="password" id="stc-profile-pass" placeholder="Nhập mật khẩu">
+                        </div>
+                        <label class="stc-remember" style="margin: 6px 0 10px;">
+                            <input type="checkbox" id="stc-profile-remember">
+                            <span>Lưu local (dùng cho điểm, lịch nghỉ/bù, TKB API, và auto-login course)</span>
+                        </label>
+                        <div class="stc-profile-actions">
+                            <button id="stc-profile-login" class="btn btn-primary btn-small">Đăng nhập</button>
+                            <button id="stc-profile-clear" class="btn btn-outline btn-small">Xóa lưu</button>
+                        </div>
+                        <div class="stc-auth-meta" id="stc-profile-meta"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Large Custom Deadline Modal -->
     <div id="custom-deadline-modal" class="modal hidden large-modal">
